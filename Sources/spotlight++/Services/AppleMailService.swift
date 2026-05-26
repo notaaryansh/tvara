@@ -4,165 +4,327 @@ import SQLite3
 private let SQLITE_TRANSIENT_ML = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 actor AppleMailService {
-    /// Resolved at runtime to whichever `~/Library/Mail/V*/MailData/Envelope Index`
-    /// exists. Nil if Mail isn't set up on this Mac.
-    private var resolvedDbPath: String?
+    // MARK: - Configuration
+
     private let mailBase: String
+    private let indexDbPath: String
+    private var db: OpaquePointer?
+    private var lastBuildCheck: Date?
+    private var buildTask: Task<Void, Never>?
+    private static let refreshLifetime: TimeInterval = 300   // re-scan at most every 5 min
 
     init() {
         self.mailBase = NSHomeDirectory() + "/Library/Mail"
-        self.resolvedDbPath = Self.locateEnvelopeIndex(under: NSHomeDirectory() + "/Library/Mail")
+
+        let supportDir = NSHomeDirectory()
+            + "/Library/Application Support/spotlight++"
+        try? FileManager.default.createDirectory(
+            atPath: supportDir, withIntermediateDirectories: true
+        )
+        self.indexDbPath = supportDir + "/mail_index.db"
+        self.db = Self.openAndPrepareSchema(path: indexDbPath)
     }
 
+    deinit {
+        if let db { sqlite3_close(db) }
+    }
+
+    // MARK: - Public API
+
     func isPermissionDenied() -> Bool {
-        // We may have a cached path; re-check it's still readable.
-        if let p = resolvedDbPath {
-            if !FileManager.default.fileExists(atPath: p) { return false }
-            return !FileManager.default.isReadableFile(atPath: p)
-        }
-        // No path resolved either because Mail isn't set up OR because we
-        // couldn't even enumerate the Mail directory due to TCC.
         return !FileManager.default.isReadableFile(atPath: mailBase)
+    }
+
+    func warmCache() async {
+        await refreshIfNeeded()
     }
 
     func search(query: String, limit: Int = 30) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
+        guard FileManager.default.fileExists(atPath: mailBase) else { return [] }
 
-        // Re-resolve in case Mail wasn't ready at init time.
-        if resolvedDbPath == nil {
-            resolvedDbPath = Self.locateEnvelopeIndex(under: mailBase)
-        }
-        guard let dbPath = resolvedDbPath else { return [] }
-        guard FileManager.default.fileExists(atPath: dbPath) else { return [] }
-
-        // Mail's Envelope Index is sometimes opened with WAL; copy siblings too.
-        let tmpDb  = NSTemporaryDirectory() + "spotlight_mail_\(UUID().uuidString).db"
-        let tmpWal = tmpDb + "-wal"
-        let tmpShm = tmpDb + "-shm"
-
-        do {
-            try FileManager.default.copyItem(atPath: dbPath, toPath: tmpDb)
-        } catch {
-            return []
-        }
-        if FileManager.default.fileExists(atPath: dbPath + "-wal") {
-            try? FileManager.default.copyItem(atPath: dbPath + "-wal", toPath: tmpWal)
-        }
-        if FileManager.default.fileExists(atPath: dbPath + "-shm") {
-            try? FileManager.default.copyItem(atPath: dbPath + "-shm", toPath: tmpShm)
-        }
-        defer {
-            try? FileManager.default.removeItem(atPath: tmpDb)
-            try? FileManager.default.removeItem(atPath: tmpWal)
-            try? FileManager.default.removeItem(atPath: tmpShm)
-        }
-
-        return querySQL(path: tmpDb, query: trimmed, limit: limit)
+        await refreshIfNeeded()
+        return queryFTS(query: trimmed, limit: limit)
     }
 
-    // MARK: - SQL
+    // MARK: - FTS5 query
 
-    private func querySQL(path: String, query: String, limit: Int) -> [SearchResult] {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            return []
-        }
-        defer { sqlite3_close(db) }
+    private func queryFTS(query: String, limit: Int) -> [SearchResult] {
+        // Build a safe FTS5 MATCH expression. Tokens are quoted to avoid
+        // user input being interpreted as FTS5 operators (NEAR, AND, etc).
+        // Each whitespace-separated word becomes a prefix-match term.
+        let tokens = query
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+            .map { tok -> String in
+                let safe = tok.replacingOccurrences(of: "\"", with: "")
+                return "\"\(safe)\"*"
+            }
+        guard !tokens.isEmpty else { return [] }
+        let matchExpr = tokens.joined(separator: " ")
 
-        // Envelope Index uses deduped subjects + addresses tables.
-        // Match against subject, sender address, and sender display name.
         let sql = """
-            SELECT
-                m.ROWID,
-                m.message_id,
-                s.subject,
-                a.address,
-                a.comment,
-                m.date_received
-            FROM messages m
-            LEFT JOIN subjects s  ON s.ROWID = m.subject
-            LEFT JOIN addresses a ON a.ROWID = m.sender
-            WHERE m.message_id IS NOT NULL
-              AND ( s.subject LIKE ? COLLATE NOCASE
-                 OR a.address LIKE ? COLLATE NOCASE
-                 OR a.comment LIKE ? COLLATE NOCASE )
-            ORDER BY m.date_received DESC
+            SELECT message_id, subject, sender, body, date_received
+            FROM mail_fts
+            WHERE mail_fts MATCH ?
+            ORDER BY rank
             LIMIT \(limit)
         """
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            return []
-        }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, matchExpr, -1, SQLITE_TRANSIENT_ML)
 
-        let pattern = "%\(query)%"
-        sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT_ML)
-        sqlite3_bind_text(stmt, 2, pattern, -1, SQLITE_TRANSIENT_ML)
-        sqlite3_bind_text(stmt, 3, pattern, -1, SQLITE_TRANSIENT_ML)
-
-        let now = Date()
         var out: [SearchResult] = []
-
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let messageId = colTextOptional(stmt, 1) ?? ""
-            let subject   = colTextOptional(stmt, 2) ?? "(no subject)"
-            let senderAddr = colTextOptional(stmt, 3) ?? ""
-            let senderName = colTextOptional(stmt, 4) ?? ""
-            let dateRaw   = sqlite3_column_int64(stmt, 5)
+            let messageId = colText(stmt, 0)
+            let subject   = colText(stmt, 1)
+            let sender    = colText(stmt, 2)
+            let body      = colText(stmt, 3)
+            let dateUnix  = sqlite3_column_int64(stmt, 4)
 
             guard !messageId.isEmpty else { continue }
+            let date = dateUnix > 0
+                ? Date(timeIntervalSince1970: TimeInterval(dateUnix))
+                : nil
 
-            let date = Date(timeIntervalSince1970: TimeInterval(dateRaw))
-            let title = senderName.isEmpty ? senderAddr : senderName
-            let subtitle = subject
+            // Choose snippet: if the body contains the matched text, prefer
+            // a window around it; else fall back to subject + sender.
+            let snippet = snippetFor(body: body, subject: subject, query: query)
 
-            // message:// URL scheme expects the Message-ID with angle
-            // brackets, URL-encoded. Envelope Index stores the bare value.
             let encoded = "<\(messageId)>".addingPercentEncoding(
                 withAllowedCharacters: .urlHostAllowed
             ) ?? messageId
             let openURL = "message://\(encoded)"
 
-            let days = max(0, now.timeIntervalSince(date) / 86_400)
-            let rank = 60 + max(0, 80 - Int(days / 3))
+            // Sender display: parse "Name <addr@x>" → "Name" if name present
+            let (displayName, addr) = parseSender(sender)
 
             out.append(SearchResult(
-                title: title.isEmpty ? "(unknown sender)" : title,
-                subtitle: subtitle,
+                title: subject.isEmpty ? "(no subject)" : subject,
+                subtitle: snippet,
                 source: .mail,
                 date: date,
-                badge: senderAddr.isEmpty ? nil : senderAddr,
+                badge: displayName.isEmpty ? addr : displayName,
                 openTarget: .url(openURL),
-                rank: rank
+                rank: 60   // FTS5 already ordered by relevance via rank
             ))
         }
         return out
     }
 
-    // MARK: - Path resolution
-
-    private static func locateEnvelopeIndex(under base: String) -> String? {
-        // Find the highest-versioned MailData/Envelope Index path.
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: base) else {
-            return nil
+    private func snippetFor(body: String, subject: String, query: String) -> String {
+        let q = query.lowercased()
+        let bLower = body.lowercased()
+        if let r = bLower.range(of: q) {
+            let start = bLower.index(r.lowerBound, offsetBy: -60, limitedBy: bLower.startIndex)
+                ?? bLower.startIndex
+            let end = bLower.index(r.upperBound, offsetBy: 100, limitedBy: bLower.endIndex)
+                ?? bLower.endIndex
+            // Map back to the original-case body for display.
+            let lowerStart = bLower.distance(from: bLower.startIndex, to: start)
+            let lowerEnd   = bLower.distance(from: bLower.startIndex, to: end)
+            let bStart = body.index(body.startIndex, offsetBy: lowerStart)
+            let bEnd   = body.index(body.startIndex, offsetBy: lowerEnd)
+            return "…\(body[bStart..<bEnd])…"
         }
-        let versionDirs = entries.filter { $0.hasPrefix("V") && Int($0.dropFirst()) != nil }
-        let sorted = versionDirs.sorted { (a, b) in
-            (Int(a.dropFirst()) ?? 0) > (Int(b.dropFirst()) ?? 0)
-        }
-        for v in sorted {
-            let candidate = "\(base)/\(v)/MailData/Envelope Index"
-            if FileManager.default.fileExists(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
+        if !subject.isEmpty { return subject }
+        if !body.isEmpty { return String(body.prefix(120)) }
+        return ""
     }
 
-    private func colTextOptional(_ stmt: OpaquePointer?, _ idx: Int32) -> String? {
-        guard let p = sqlite3_column_text(stmt, idx) else { return nil }
+    private func parseSender(_ s: String) -> (name: String, address: String) {
+        // "Foo Bar <foo@bar.com>" → ("Foo Bar", "foo@bar.com")
+        if let lt = s.firstIndex(of: "<"), let gt = s.lastIndex(of: ">"), lt < gt {
+            let name = s[..<lt].trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            let addr = String(s[s.index(after: lt)..<gt])
+            return (name, addr)
+        }
+        return ("", s)
+    }
+
+    // MARK: - Schema
+
+    nonisolated private static func openAndPrepareSchema(path: String) -> OpaquePointer? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(
+            path, &db,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
+            nil
+        ) == SQLITE_OK else { return nil }
+
+        let stmts = [
+            "PRAGMA journal_mode=WAL",
+            "PRAGMA synchronous=NORMAL",
+            "PRAGMA temp_store=MEMORY",
+            // FTS5 virtual table — `rank` column comes for free in FTS5.
+            // We mark non-search columns UNINDEXED so they don't bloat the
+            // FTS tokenization tables.
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS mail_fts USING fts5(
+                message_id UNINDEXED,
+                subject,
+                sender,
+                body,
+                path UNINDEXED,
+                date_received UNINDEXED,
+                tokenize = 'unicode61 remove_diacritics 2'
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """,
+            // Track file→message mapping so we can skip files we've already
+            // ingested even when the FTS table contains them.
+            """
+            CREATE TABLE IF NOT EXISTS indexed_files (
+                path TEXT PRIMARY KEY,
+                mtime REAL NOT NULL
+            )
+            """
+        ]
+        for s in stmts { sqlite3_exec(db, s, nil, nil, nil) }
+        return db
+    }
+
+    // MARK: - Refresh / build pipeline
+
+    private func refreshIfNeeded() async {
+        if let t = lastBuildCheck, Date().timeIntervalSince(t) < Self.refreshLifetime {
+            return
+        }
+        if let existing = buildTask {
+            await existing.value
+            return
+        }
+        let task = Task { await self.runIncrementalBuild() }
+        buildTask = task
+        await task.value
+        buildTask = nil
+        lastBuildCheck = Date()
+    }
+
+    private func runIncrementalBuild() async {
+        let alreadyIndexed = loadIndexedFiles()
+        let mailBase = self.mailBase
+
+        let parsed: [IndexedMailRow] = await Task.detached(priority: .userInitiated) {
+            Self.walkEmlxFiles(under: mailBase, skip: alreadyIndexed)
+        }.value
+
+        guard !parsed.isEmpty else { return }
+        ingestFTS(parsed)
+    }
+
+    /// Per-message ingest payload: parsed RFC822 fields plus filesystem
+    /// metadata we need to track which files have been indexed.
+    private struct IndexedMailRow: Sendable {
+        let messageId: String
+        let subject: String
+        let from: String
+        let body: String
+        let date: Date?
+        let path: String
+        let mtime: Double
+    }
+
+    private func loadIndexedFiles() -> Set<String> {
+        var out = Set<String>()
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT path FROM indexed_files",
+                                 -1, &stmt, nil) == SQLITE_OK else { return out }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let p = sqlite3_column_text(stmt, 0) {
+                out.insert(String(cString: p))
+            }
+        }
+        return out
+    }
+
+    private func ingestFTS(_ rows: [IndexedMailRow]) {
+        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
+
+        var ftsStmt: OpaquePointer?
+        var idxStmt: OpaquePointer?
+        sqlite3_prepare_v2(db, """
+            INSERT INTO mail_fts(message_id, subject, sender, body, path, date_received)
+            VALUES(?,?,?,?,?,?)
+        """, -1, &ftsStmt, nil)
+        sqlite3_prepare_v2(db, """
+            INSERT OR REPLACE INTO indexed_files(path, mtime) VALUES(?,?)
+        """, -1, &idxStmt, nil)
+        defer {
+            sqlite3_finalize(ftsStmt)
+            sqlite3_finalize(idxStmt)
+        }
+
+        for r in rows {
+            sqlite3_bind_text(ftsStmt, 1, r.messageId, -1, SQLITE_TRANSIENT_ML)
+            sqlite3_bind_text(ftsStmt, 2, r.subject,   -1, SQLITE_TRANSIENT_ML)
+            sqlite3_bind_text(ftsStmt, 3, r.from,      -1, SQLITE_TRANSIENT_ML)
+            sqlite3_bind_text(ftsStmt, 4, r.body,      -1, SQLITE_TRANSIENT_ML)
+            sqlite3_bind_text(ftsStmt, 5, r.path,      -1, SQLITE_TRANSIENT_ML)
+            sqlite3_bind_int64(ftsStmt, 6, Int64(r.date?.timeIntervalSince1970 ?? 0))
+            sqlite3_step(ftsStmt); sqlite3_reset(ftsStmt)
+
+            sqlite3_bind_text(idxStmt, 1, r.path, -1, SQLITE_TRANSIENT_ML)
+            sqlite3_bind_double(idxStmt, 2, r.mtime)
+            sqlite3_step(idxStmt); sqlite3_reset(idxStmt)
+        }
+
+        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+    }
+
+    // MARK: - .emlx walker (heavy; runs detached)
+
+    nonisolated private static func walkEmlxFiles(
+        under base: String, skip: Set<String>
+    ) -> [IndexedMailRow] {
+        var out: [IndexedMailRow] = []
+        let fm = FileManager.default
+
+        guard let enumerator = fm.enumerator(
+            at: URL(fileURLWithPath: base),
+            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension == "emlx" else { continue }
+            let path = fileURL.path
+            if skip.contains(path) { continue }
+
+            let values = try? fileURL.resourceValues(
+                forKeys: [.isRegularFileKey, .contentModificationDateKey]
+            )
+            guard values?.isRegularFile == true else { continue }
+
+            guard let parsed = EmlxParser.parse(fileURL: fileURL) else { continue }
+
+            out.append(IndexedMailRow(
+                messageId: parsed.messageId,
+                subject:   parsed.subject,
+                from:      parsed.from,
+                body:      parsed.body,
+                date:      parsed.date,
+                path:      path,
+                mtime:     values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+            ))
+        }
+        return out
+    }
+
+    // MARK: - Helpers
+
+    private func colText(_ stmt: OpaquePointer?, _ idx: Int32) -> String {
+        guard let p = sqlite3_column_text(stmt, idx) else { return "" }
         return String(cString: p)
     }
 }
