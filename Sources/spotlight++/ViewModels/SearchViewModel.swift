@@ -8,14 +8,18 @@ enum SearchTab: String, CaseIterable, Hashable {
     case files
     case messages
     case discord
+    case imessage
+    case mail
 
     var label: String {
         switch self {
         case .apps:     return "Apps"
         case .browser:  return "Browser"
         case .files:    return "Files"
-        case .messages: return "Messages"
+        case .messages: return "WhatsApp"
         case .discord:  return "Discord"
+        case .imessage: return "iMessage"
+        case .mail:     return "Mail"
         }
     }
 }
@@ -28,6 +32,8 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var appResults: [SearchResult] = []
     @Published private(set) var messageResults: [SearchResult] = []
     @Published private(set) var discordResults: [SearchResult] = []
+    @Published private(set) var imessageResults: [SearchResult] = []
+    @Published private(set) var mailResults: [SearchResult] = []
     @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
     @Published private(set) var isLoading: Bool = false
@@ -40,6 +46,8 @@ final class SearchViewModel: ObservableObject {
     private let appService: AppSearchService
     private let whatsappService: WhatsAppService
     private let discordService: DiscordService
+    private let imessageService: AppleMessagesService
+    private let mailService: AppleMailService
     private var cancellables = Set<AnyCancellable>()
     private var currentSearchID = 0
 
@@ -48,13 +56,17 @@ final class SearchViewModel: ObservableObject {
         fileService: FileSearchService = FileSearchService(),
         appService: AppSearchService = AppSearchService(),
         whatsappService: WhatsAppService = WhatsAppService(),
-        discordService: DiscordService = DiscordService()
+        discordService: DiscordService = DiscordService(),
+        imessageService: AppleMessagesService = AppleMessagesService(),
+        mailService: AppleMailService = AppleMailService()
     ) {
         self.browserService = browserService
         self.fileService = fileService
         self.appService = appService
         self.whatsappService = whatsappService
         self.discordService = discordService
+        self.imessageService = imessageService
+        self.mailService = mailService
 
         $query
             .removeDuplicates()
@@ -62,13 +74,9 @@ final class SearchViewModel: ObservableObject {
             .sink { [weak self] q in self?.performSearch(q) }
             .store(in: &cancellables)
 
-        // Populate slow indexes in the background so the first ⌘K → query
-        // doesn't pay for cold scans.
         Task { [appService] in await appService.warmCache() }
         Task { [discordService] in await discordService.warmCache() }
     }
-
-    // MARK: - Tabs
 
     func cycleTab(forward: Bool) {
         let all = SearchTab.allCases
@@ -86,22 +94,18 @@ final class SearchViewModel: ObservableObject {
         case .files:    return fileResults.count
         case .messages: return messageResults.count
         case .discord:  return discordResults.count
+        case .imessage: return imessageResults.count
+        case .mail:     return mailResults.count
         }
     }
-
-    // MARK: - Search
 
     private func performSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
-            browserResults = []
-            fileResults = []
-            appResults = []
-            messageResults = []
-            discordResults = []
-            results = []
-            selectedIndex = 0
-            isLoading = false
+            browserResults = []; fileResults = []; appResults = []
+            messageResults = []; discordResults = []
+            imessageResults = []; mailResults = []
+            results = []; selectedIndex = 0; isLoading = false
             return
         }
 
@@ -113,17 +117,20 @@ final class SearchViewModel: ObservableObject {
             async let browser  = browserService.search(query: trimmed)
             async let files    = fileService.search(query: trimmed)
             async let apps     = appService.search(query: trimmed)
-            async let messages = whatsappService.search(query: trimmed)
+            async let whatsapp = whatsappService.search(query: trimmed)
             async let discord  = discordService.search(query: trimmed)
-            let (b, f, a, m, d) = await (browser, files, apps, messages, discord)
+            async let imsg     = imessageService.search(query: trimmed)
+            async let mail     = mailService.search(query: trimmed)
+            let (b, f, a, w, d, im, ml) = await (browser, files, apps, whatsapp, discord, imsg, mail)
 
-            // Drop stale responses (user kept typing).
             guard searchID == currentSearchID else { return }
             self.browserResults = b
             self.fileResults = f
             self.appResults = a
-            self.messageResults = m
+            self.messageResults = w
             self.discordResults = d
+            self.imessageResults = im
+            self.mailResults = ml
             self.syncDisplayedResults(resetSelection: true)
             self.isLoading = false
         }
@@ -136,11 +143,11 @@ final class SearchViewModel: ObservableObject {
         case .files:    results = fileResults
         case .messages: results = messageResults
         case .discord:  results = discordResults
+        case .imessage: results = imessageResults
+        case .mail:     results = mailResults
         }
         if resetSelection { selectedIndex = 0 }
     }
-
-    // MARK: - Selection / open
 
     func moveSelection(by delta: Int) {
         guard !results.isEmpty else { return }
@@ -161,13 +168,18 @@ final class SearchViewModel: ObservableObject {
             guard let url = URL(string: s) else { return false }
             NSWorkspace.shared.open(url)
             return true
+
         case .file(let path):
             return NSWorkspace.shared.open(URL(fileURLWithPath: path))
-        case .whatsappChat(let jid, let messageText):
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setString(messageText, forType: .string)
 
+        case .whatsappChat(let jid, let messageText):
+            // Only stage clipboard for message hits (so the user can ⌘F+⌘V
+            // inside WhatsApp). Contact hits leave the clipboard alone.
+            if !messageText.isEmpty {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(messageText, forType: .string)
+            }
             if jid.hasSuffix("@s.whatsapp.net"),
                let at = jid.firstIndex(of: "@") {
                 let phone = String(jid[..<at])
@@ -178,19 +190,28 @@ final class SearchViewModel: ObservableObject {
                 }
             }
             return NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/WhatsApp.app"))
+
+        case .imessageChat(let handle, let messageText):
+            if !messageText.isEmpty {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(messageText, forType: .string)
+            }
+            if !handle.isEmpty,
+               let url = URL(string: "sms:\(handle)") {
+                NSWorkspace.shared.open(url)
+                return true
+            }
+            return NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Messages.app"))
         }
     }
 
     func reset() {
         query = ""
-        browserResults = []
-        fileResults = []
-        appResults = []
-        messageResults = []
-        discordResults = []
-        results = []
-        selectedIndex = 0
-        isLoading = false
+        browserResults = []; fileResults = []; appResults = []
+        messageResults = []; discordResults = []
+        imessageResults = []; mailResults = []
+        results = []; selectedIndex = 0; isLoading = false
         activeTab = .apps
     }
 }

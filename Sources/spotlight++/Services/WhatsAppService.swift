@@ -21,31 +21,31 @@ actor WhatsAppService {
         guard trimmed.count >= 2 else { return [] }
         guard FileManager.default.fileExists(atPath: dbPath) else { return [] }
 
-        // Copy the main db + WAL/SHM together so a write in flight at copy
-        // time doesn't corrupt the snapshot we read.
-        let tmpDb  = NSTemporaryDirectory() + "spotlight_wa_\(UUID().uuidString).sqlite"
-        let tmpWal = tmpDb + "-wal"
-        let tmpShm = tmpDb + "-shm"
-
+        // Single copy of the db serves both contact + message queries.
+        let tmpDb2 = NSTemporaryDirectory()
+            + "spotlight_wa_combined_\(UUID().uuidString).sqlite"
         do {
-            try FileManager.default.copyItem(atPath: dbPath, toPath: tmpDb)
+            try FileManager.default.copyItem(atPath: dbPath, toPath: tmpDb2)
         } catch {
             return []
         }
         if FileManager.default.fileExists(atPath: dbPath + "-wal") {
-            try? FileManager.default.copyItem(atPath: dbPath + "-wal", toPath: tmpWal)
+            try? FileManager.default.copyItem(atPath: dbPath + "-wal", toPath: tmpDb2 + "-wal")
         }
         if FileManager.default.fileExists(atPath: dbPath + "-shm") {
-            try? FileManager.default.copyItem(atPath: dbPath + "-shm", toPath: tmpShm)
+            try? FileManager.default.copyItem(atPath: dbPath + "-shm", toPath: tmpDb2 + "-shm")
         }
         defer {
-            try? FileManager.default.removeItem(atPath: tmpDb)
-            try? FileManager.default.removeItem(atPath: tmpWal)
-            try? FileManager.default.removeItem(atPath: tmpShm)
+            try? FileManager.default.removeItem(atPath: tmpDb2)
+            try? FileManager.default.removeItem(atPath: tmpDb2 + "-wal")
+            try? FileManager.default.removeItem(atPath: tmpDb2 + "-shm")
         }
 
-        let avatarIndex = buildAvatarIndex()
-        return querySQLite(path: tmpDb, query: trimmed, limit: limit, avatarIndex: avatarIndex)
+        let avatars = buildAvatarIndex()
+        let contacts = queryContacts(path: tmpDb2, query: trimmed, avatarIndex: avatars)
+        let messages = querySQLite(path: tmpDb2, query: trimmed,
+                                   limit: limit, avatarIndex: avatars)
+        return contacts + messages
     }
 
     /// Builds a `<localPart> -> bestFilePath` map once per search by listing
@@ -70,6 +70,67 @@ actor WhatsAppService {
             index[localPart] = (path, isJpg)
         }
         return index.mapValues { $0.path }
+    }
+
+    /// Match against contact display names (`ZPARTNERNAME`) and emit
+    /// top-ranked "open chat with X" results. These appear above message
+    /// hits so typing a contact's name immediately offers their chat.
+    private func queryContacts(
+        path: String, query: String, avatarIndex: [String: String]
+    ) -> [SearchResult] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT ZPARTNERNAME, ZCONTACTJID, ZSESSIONTYPE, ZLASTMESSAGEDATE
+            FROM ZWACHATSESSION
+            WHERE ZPARTNERNAME LIKE ? COLLATE NOCASE
+              AND ZPARTNERNAME IS NOT NULL
+              AND ZPARTNERNAME != ''
+              AND ZREMOVED = 0
+            ORDER BY ZLASTMESSAGEDATE DESC
+            LIMIT 8
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let pattern = "%\(query)%"
+        sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT_WA)
+
+        var results: [SearchResult] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let name = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+            let jid  = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            let lastMsgTs = sqlite3_column_double(stmt, 3)
+            guard !name.isEmpty, !jid.isEmpty else { continue }
+
+            let avatarData = Self.loadAvatar(forJid: jid, avatarIndex: avatarIndex)
+            let date = lastMsgTs > 0
+                ? Date(timeIntervalSinceReferenceDate: lastMsgTs)
+                : nil
+            let subtitle = jid.hasSuffix("@g.us")
+                ? "Open WhatsApp group"
+                : "Open WhatsApp chat"
+
+            results.append(SearchResult(
+                title: name,
+                subtitle: subtitle,
+                source: .whatsapp,
+                date: date,
+                badge: nil,
+                openTarget: .whatsappChat(jid: jid, messageText: ""),
+                rank: 1_000,                                 // top of results
+                iconData: avatarData
+            ))
+        }
+        return results
     }
 
     private func querySQLite(

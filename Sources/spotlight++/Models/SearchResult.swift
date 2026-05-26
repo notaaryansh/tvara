@@ -57,6 +57,11 @@ struct SearchResult: Identifiable, Hashable {
         /// the app), copying the message text to the clipboard so the user
         /// can ⌘F + ⌘V inside WhatsApp to find it.
         case whatsappChat(jid: String, messageText: String)
+        /// Open an Apple Messages chat with the given handle (phone/email),
+        /// copying the message text to the clipboard so ⌘F + ⌘V inside
+        /// Messages finds the specific bubble. Apple doesn't expose a
+        /// per-message URL.
+        case imessageChat(handle: String, messageText: String)
     }
 
     enum Source: String, CaseIterable {
@@ -69,6 +74,8 @@ struct SearchResult: Identifiable, Hashable {
         case app      = "App"
         case whatsapp = "WhatsApp"
         case discord  = "Discord"
+        case imessage = "Messages"
+        case mail     = "Mail"
 
         var icon: String {
             switch self {
@@ -81,6 +88,8 @@ struct SearchResult: Identifiable, Hashable {
             case .app:      return "app.fill"
             case .whatsapp: return "message.fill"
             case .discord:  return "bubble.left.and.bubble.right.fill"
+            case .imessage: return "bubble.left.fill"
+            case .mail:     return "envelope.fill"
             }
         }
 
@@ -95,6 +104,8 @@ struct SearchResult: Identifiable, Hashable {
             case .app:      return Color(red: 0.55, green: 0.40, blue: 0.95)
             case .whatsapp: return Color(red: 0.15, green: 0.78, blue: 0.42)
             case .discord:  return Color(red: 0.35, green: 0.40, blue: 0.95)
+            case .imessage: return Color(red: 0.16, green: 0.72, blue: 0.35)
+            case .mail:     return Color(red: 0.16, green: 0.45, blue: 0.95)
             }
         }
     }

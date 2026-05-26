@@ -43,7 +43,94 @@ actor DiscordService {
         guard FileManager.default.fileExists(atPath: cacheDir) else { return [] }
 
         await refreshIfNeeded()
-        return querySQL(needle: trimmed, limit: limit)
+        let contacts = queryContacts(needle: trimmed)
+        let messages = querySQL(needle: trimmed, limit: limit)
+        return contacts + messages
+    }
+
+    /// Match against known Discord usernames + guild names. Top-ranked so
+    /// they appear above message hits. For users we have a DM channel for,
+    /// deep-link straight to the DM; otherwise open the user's profile.
+    private func queryContacts(needle: String) -> [SearchResult] {
+        var out: [SearchResult] = []
+        let pattern = "%\(needle)%"
+
+        // ---- Users (matches Discord usernames) ----
+        // LEFT JOIN channels to find a DM channel (recipient_id = user.id)
+        // when one exists, plus avatar bytes for the card.
+        let userSQL = """
+            SELECT u.id, u.username,
+                   c.id AS dm_channel_id,
+                   a.image_data AS avatar
+            FROM users u
+            LEFT JOIN channels c ON c.recipient_id = u.id
+            LEFT JOIN avatars a ON a.user_id = u.id
+            WHERE u.username LIKE ? COLLATE NOCASE
+            LIMIT 6
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, userSQL, -1, &stmt, nil) == SQLITE_OK {
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT_DC)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let userId = colText(stmt, 0)
+                let name   = colText(stmt, 1)
+                let dmCh   = colTextOptional(stmt, 2)
+                let avatar = colBlobOptional(stmt, 3)
+                guard !userId.isEmpty, !name.isEmpty else { continue }
+
+                // Prefer a known DM channel for the deep-link; fall back to
+                // the user-profile URL which lets you DM them from there.
+                let openURL: String = {
+                    if let dmCh, !dmCh.isEmpty {
+                        return "discord://-/channels/@me/\(dmCh)"
+                    }
+                    return "discord://-/users/\(userId)"
+                }()
+
+                out.append(SearchResult(
+                    title: name,
+                    subtitle: "Open Discord DM",
+                    source: .discord,
+                    date: nil,
+                    badge: nil,
+                    openTarget: .url(openURL),
+                    rank: 1_000,
+                    iconData: avatar
+                ))
+            }
+        }
+
+        // ---- Guilds (matches server names) ----
+        let guildSQL = """
+            SELECT g.id, g.name, gi.image_data
+            FROM guilds g
+            LEFT JOIN guild_icons gi ON gi.guild_id = g.id
+            WHERE g.name LIKE ? COLLATE NOCASE
+            LIMIT 4
+        """
+        var gStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, guildSQL, -1, &gStmt, nil) == SQLITE_OK {
+            defer { sqlite3_finalize(gStmt) }
+            sqlite3_bind_text(gStmt, 1, pattern, -1, SQLITE_TRANSIENT_DC)
+            while sqlite3_step(gStmt) == SQLITE_ROW {
+                let id   = colText(gStmt, 0)
+                let name = colText(gStmt, 1)
+                let icon = colBlobOptional(gStmt, 2)
+                guard !id.isEmpty, !name.isEmpty else { continue }
+                out.append(SearchResult(
+                    title: name,
+                    subtitle: "Open Discord server",
+                    source: .discord,
+                    date: nil,
+                    badge: nil,
+                    openTarget: .url("discord://-/channels/\(id)"),
+                    rank: 1_000,
+                    iconData: icon
+                ))
+            }
+        }
+        return out
     }
 
     // MARK: - Index lifecycle
@@ -697,18 +784,32 @@ actor DiscordService {
         )))
     }
 
-    /// Recursively walk a JSON tree harvesting any embedded guild or
-    /// channel objects. We use TWO complementary signals:
-    ///   - structural (`looksLikeGuild` / `looksLikeChannel`): trust
-    ///     guild-only or channel-only fields when they're present
-    ///   - contextual (`parentKey`): if a `{id, name}` dict appears under a
-    ///     `"guild"` / `"guilds"` / `"channel"` / `"channels"` key, the
-    ///     parent's labelling identifies it even when the dict itself is a
-    ///     minimal `{id, name, icon}` reference
+    /// Recursively walk a JSON tree harvesting embedded guild/channel
+    /// objects and ANY co-occurrence of `channel_id` + `guild_id`.
+    /// The contextual co-occurrence is what unlocks the vast majority of
+    /// channel→guild mappings: Discord embeds `{channel_id, guild_id}`
+    /// pairs all over (notifications, mentions, voice states, message
+    /// references), even when no full channel object is present.
+    ///
+    /// We propagate `guild_id` and `channel_id` down the tree so a `guild_id`
+    /// at one level can pair with a `channel_id` at a deeper level (mention
+    /// objects, etc).
     nonisolated private static func harvestObjects(
-        in node: Any, parentKey: String? = nil, into out: inout [ParsedEndpoint]
+        in node: Any,
+        parentKey: String? = nil,
+        parentGuildId: String? = nil,
+        parentChannelId: String? = nil,
+        into out: inout [ParsedEndpoint]
     ) {
         if let dict = node as? [String: Any] {
+            // Update context with any guild_id / channel_id at THIS level,
+            // overriding inherited values.
+            var gid = parentGuildId
+            var cid = parentChannelId
+            if let g = dict["guild_id"] as? String, !g.isEmpty { gid = g }
+            if let c = dict["channel_id"] as? String, !c.isEmpty { cid = c }
+
+            // ---- structural detection of full guild/channel objects ----
             if let id = dict["id"] as? String,
                let name = dict["name"] as? String,
                !id.isEmpty, !name.isEmpty {
@@ -724,24 +825,42 @@ actor DiscordService {
                           (looksLikeChannel(type: type, dict: dict) || parentSaysChannel) {
                     out.append(.channel(ChannelRow(
                         id: id, name: name,
-                        guildId: dict["guild_id"] as? String,
+                        guildId: dict["guild_id"] as? String ?? gid,
                         recipientId: nil, type: type
                     )))
                 } else if parentSaysChannel {
-                    // Channel reference without a `type` field — store with
-                    // type 0 (text) as a safe default.
                     out.append(.channel(ChannelRow(
                         id: id, name: name,
-                        guildId: dict["guild_id"] as? String,
+                        guildId: dict["guild_id"] as? String ?? gid,
                         recipientId: nil, type: 0
                     )))
                 }
             }
-            for (k, v) in dict { harvestObjects(in: v, parentKey: k, into: &out) }
+
+            // ---- contextual: emit any (channel_id, guild_id) co-occurrence ----
+            // This is the high-yield path — recovers ~170 extra mappings
+            // from message embeds, mentions, notifications, etc. The
+            // conditional channel upsert preserves existing names; this
+            // only fills in missing guild_ids.
+            if let cid, let gid {
+                out.append(.channel(ChannelRow(
+                    id: cid, name: "", guildId: gid,
+                    recipientId: nil, type: 0
+                )))
+            }
+
+            for (k, v) in dict {
+                harvestObjects(in: v, parentKey: k,
+                               parentGuildId: gid, parentChannelId: cid,
+                               into: &out)
+            }
         } else if let arr = node as? [Any] {
-            // Preserve the parent key so a "guilds": [...] array passes
-            // "guilds" down to each element.
-            for v in arr { harvestObjects(in: v, parentKey: parentKey, into: &out) }
+            for v in arr {
+                harvestObjects(in: v, parentKey: parentKey,
+                               parentGuildId: parentGuildId,
+                               parentChannelId: parentChannelId,
+                               into: &out)
+            }
         }
     }
 

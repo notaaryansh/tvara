@@ -7,8 +7,12 @@ struct SearchResultRow: View {
     var highlightQuery: String = ""
 
     private var isApp: Bool { result.source == .app }
-    private var isMessage: Bool { result.source == .whatsapp || result.source == .discord }
+    private var isMessage: Bool {
+        result.source == .whatsapp || result.source == .discord
+        || result.source == .imessage || result.source == .mail
+    }
     private var isDiscord: Bool { result.source == .discord }
+    private var isMail: Bool { result.source == .mail }
 
     var body: some View {
         HStack(alignment: isMessage ? .top : .center, spacing: 12) {
@@ -54,9 +58,13 @@ struct SearchResultRow: View {
                 .frame(width: 36, height: 36)
         case .whatsappChat:
             messageAvatar(platformBadge: Self.whatsappBadgeIcon)
+        case .imessageChat:
+            messageAvatar(platformBadge: Self.messagesBadgeIcon)
         case .url:
             if isDiscord {
                 messageAvatar(platformBadge: Self.discordBadgeIcon)
+            } else if isMail {
+                messageAvatar(platformBadge: Self.mailBadgeIcon)
             } else if let data = result.iconData, let img = NSImage(data: data) {
                 Image(nsImage: img)
                     .resizable()
@@ -80,6 +88,10 @@ struct SearchResultRow: View {
 
     private static let discordBadgeIcon: NSImage =
         NSWorkspace.shared.icon(forFile: "/Applications/Discord.app")
+    private static let messagesBadgeIcon: NSImage =
+        NSWorkspace.shared.icon(forFile: "/System/Applications/Messages.app")
+    private static let mailBadgeIcon: NSImage =
+        NSWorkspace.shared.icon(forFile: "/System/Applications/Mail.app")
 
     /// Circular avatar (or initial-letter placeholder) + small platform logo
     /// badge in the bottom-right corner. Same pattern for WhatsApp, Discord,
