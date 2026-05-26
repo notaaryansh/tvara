@@ -3,26 +3,18 @@ import Combine
 import Foundation
 
 enum SearchTab: String, CaseIterable, Hashable {
-    case apps
-    case browser
-    case files
-    case messages
-    case discord
-    case imessage
+    case all
+    case messages   // iMessage + WhatsApp + Discord merged
     case mail
-    case terminal
+    case apps
     case clipboard
 
     var label: String {
         switch self {
-        case .apps:      return "Apps"
-        case .browser:   return "Browser"
-        case .files:     return "Files"
-        case .messages:  return "WhatsApp"
-        case .discord:   return "Discord"
-        case .imessage:  return "iMessage"
+        case .all:       return "All"
+        case .messages:  return "Messages"
         case .mail:      return "Mail"
-        case .terminal:  return "Terminal"
+        case .apps:      return "Apps"
         case .clipboard: return "Clipboard"
         }
     }
@@ -34,16 +26,15 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var browserResults: [SearchResult] = []
     @Published private(set) var fileResults: [SearchResult] = []
     @Published private(set) var appResults: [SearchResult] = []
-    @Published private(set) var messageResults: [SearchResult] = []
+    @Published private(set) var whatsappResults: [SearchResult] = []
     @Published private(set) var discordResults: [SearchResult] = []
     @Published private(set) var imessageResults: [SearchResult] = []
     @Published private(set) var mailResults: [SearchResult] = []
-    @Published private(set) var terminalResults: [SearchResult] = []
     @Published private(set) var clipboardResults: [SearchResult] = []
     @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
     @Published private(set) var isLoading: Bool = false
-    @Published var activeTab: SearchTab = .apps {
+    @Published var activeTab: SearchTab = .all {
         didSet { if oldValue != activeTab { syncDisplayedResults(resetSelection: true) } }
     }
 
@@ -54,10 +45,15 @@ final class SearchViewModel: ObservableObject {
     private let discordService: DiscordService
     private let imessageService: AppleMessagesService
     private let mailService: AppleMailService
-    private let terminalService: TerminalHistoryService
     private let clipboardService: ClipboardHistoryService
+    // Terminal history service intentionally not queried right now —
+    // suppressed per UX direction. Kept in the codebase so we can re-enable
+    // by adding back the async let + a SearchTab case.
     private var cancellables = Set<AnyCancellable>()
     private var currentSearchID = 0
+
+    private static let allTabResultCap = 60
+    private static let messagesTabResultCap = 50
 
     init(
         browserService: BrowserDatabaseService = BrowserDatabaseService(),
@@ -67,7 +63,6 @@ final class SearchViewModel: ObservableObject {
         discordService: DiscordService = DiscordService(),
         imessageService: AppleMessagesService = AppleMessagesService(),
         mailService: AppleMailService = AppleMailService(),
-        terminalService: TerminalHistoryService = TerminalHistoryService(),
         clipboardService: ClipboardHistoryService = ClipboardHistoryService()
     ) {
         self.browserService = browserService
@@ -77,7 +72,6 @@ final class SearchViewModel: ObservableObject {
         self.discordService = discordService
         self.imessageService = imessageService
         self.mailService = mailService
-        self.terminalService = terminalService
         self.clipboardService = clipboardService
 
         $query
@@ -88,9 +82,10 @@ final class SearchViewModel: ObservableObject {
 
         Task { [appService] in await appService.warmCache() }
         Task { [discordService] in await discordService.warmCache() }
-        // Start the clipboard history polling loop.
         Task { [clipboardService] in await clipboardService.start() }
     }
+
+    // MARK: - Tabs
 
     func cycleTab(forward: Bool) {
         let all = SearchTab.allCases
@@ -103,25 +98,26 @@ final class SearchViewModel: ObservableObject {
 
     func count(for tab: SearchTab) -> Int {
         switch tab {
-        case .apps:      return appResults.count
-        case .browser:   return browserResults.count
-        case .files:     return fileResults.count
-        case .messages:  return messageResults.count
-        case .discord:   return discordResults.count
-        case .imessage:  return imessageResults.count
+        case .all:
+            // Reflects what the merged view actually shows (capped).
+            return min(allMerged().count, Self.allTabResultCap)
+        case .messages:
+            return min(messagesMerged().count, Self.messagesTabResultCap)
         case .mail:      return mailResults.count
-        case .terminal:  return terminalResults.count
+        case .apps:      return appResults.count
         case .clipboard: return clipboardResults.count
         }
     }
+
+    // MARK: - Search
 
     private func performSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             browserResults = []; fileResults = []; appResults = []
-            messageResults = []; discordResults = []
+            whatsappResults = []; discordResults = []
             imessageResults = []; mailResults = []
-            terminalResults = []; clipboardResults = []
+            clipboardResults = []
             results = []; selectedIndex = 0; isLoading = false
             return
         }
@@ -138,41 +134,84 @@ final class SearchViewModel: ObservableObject {
             async let discord   = discordService.search(query: trimmed)
             async let imsg      = imessageService.search(query: trimmed)
             async let mail      = mailService.search(query: trimmed)
-            async let terminal  = terminalService.search(query: trimmed)
             async let clipboard = clipboardService.search(query: trimmed)
-            let (b, f, a, w, d, im, ml, tm, cb) = await (
-                browser, files, apps, whatsapp, discord, imsg, mail, terminal, clipboard
+            let (b, f, a, w, d, im, ml, cb) = await (
+                browser, files, apps, whatsapp, discord, imsg, mail, clipboard
             )
 
             guard searchID == currentSearchID else { return }
             self.browserResults = b
             self.fileResults = f
             self.appResults = a
-            self.messageResults = w
+            self.whatsappResults = w
             self.discordResults = d
             self.imessageResults = im
             self.mailResults = ml
-            self.terminalResults = tm
             self.clipboardResults = cb
             self.syncDisplayedResults(resetSelection: true)
             self.isLoading = false
         }
     }
 
+    // MARK: - Tab → result merging
+
+    /// "All" merges every source we surface — apps, browser, files, the
+    /// three messaging sources, mail, and clipboard. Terminal results are
+    /// intentionally excluded per UX direction. Sorted by rank desc so
+    /// strong matches (contact name hits at 1000, exact-match apps at 600)
+    /// land at the top regardless of source.
+    private func allMerged() -> [SearchResult] {
+        var merged: [SearchResult] = []
+        merged.reserveCapacity(
+            appResults.count + browserResults.count + fileResults.count
+            + whatsappResults.count + discordResults.count + imessageResults.count
+            + mailResults.count + clipboardResults.count
+        )
+        merged.append(contentsOf: appResults)
+        merged.append(contentsOf: browserResults)
+        merged.append(contentsOf: fileResults)
+        merged.append(contentsOf: whatsappResults)
+        merged.append(contentsOf: discordResults)
+        merged.append(contentsOf: imessageResults)
+        merged.append(contentsOf: mailResults)
+        merged.append(contentsOf: clipboardResults)
+        return merged.sorted(by: rankSort)
+    }
+
+    /// "Messages" pill: WhatsApp + iMessage + Discord, merged + rank-sorted.
+    private func messagesMerged() -> [SearchResult] {
+        var merged: [SearchResult] = []
+        merged.reserveCapacity(
+            whatsappResults.count + discordResults.count + imessageResults.count
+        )
+        merged.append(contentsOf: whatsappResults)
+        merged.append(contentsOf: discordResults)
+        merged.append(contentsOf: imessageResults)
+        return merged.sorted(by: rankSort)
+    }
+
+    private func rankSort(_ a: SearchResult, _ b: SearchResult) -> Bool {
+        if a.rank != b.rank { return a.rank > b.rank }
+        return (a.date ?? .distantPast) > (b.date ?? .distantPast)
+    }
+
     private func syncDisplayedResults(resetSelection: Bool) {
         switch activeTab {
-        case .apps:      results = appResults
-        case .browser:   results = browserResults
-        case .files:     results = fileResults
-        case .messages:  results = messageResults
-        case .discord:   results = discordResults
-        case .imessage:  results = imessageResults
-        case .mail:      results = mailResults
-        case .terminal:  results = terminalResults
-        case .clipboard: results = clipboardResults
+        case .all:
+            results = Array(allMerged().prefix(Self.allTabResultCap))
+        case .messages:
+            results = Array(messagesMerged().prefix(Self.messagesTabResultCap))
+        case .mail:
+            results = mailResults
+        case .apps:
+            results = appResults
+        case .clipboard:
+            results = clipboardResults
         }
         if resetSelection { selectedIndex = 0 }
     }
+
+    // MARK: - Selection / open
 
     func moveSelection(by delta: Int) {
         guard !results.isEmpty else { return }
@@ -238,10 +277,10 @@ final class SearchViewModel: ObservableObject {
     func reset() {
         query = ""
         browserResults = []; fileResults = []; appResults = []
-        messageResults = []; discordResults = []
+        whatsappResults = []; discordResults = []
         imessageResults = []; mailResults = []
-        terminalResults = []; clipboardResults = []
+        clipboardResults = []
         results = []; selectedIndex = 0; isLoading = false
-        activeTab = .apps
+        activeTab = .all
     }
 }
