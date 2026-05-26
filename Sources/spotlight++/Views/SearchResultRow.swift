@@ -60,6 +60,8 @@ struct SearchResultRow: View {
             messageAvatar(platformBadge: Self.whatsappBadgeIcon)
         case .imessageChat:
             messageAvatar(platformBadge: Self.messagesBadgeIcon)
+        case .copyToClipboard:
+            tintedBadge
         case .url:
             if isDiscord {
                 messageAvatar(platformBadge: Self.discordBadgeIcon)

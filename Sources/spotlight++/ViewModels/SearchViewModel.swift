@@ -10,16 +10,20 @@ enum SearchTab: String, CaseIterable, Hashable {
     case discord
     case imessage
     case mail
+    case terminal
+    case clipboard
 
     var label: String {
         switch self {
-        case .apps:     return "Apps"
-        case .browser:  return "Browser"
-        case .files:    return "Files"
-        case .messages: return "WhatsApp"
-        case .discord:  return "Discord"
-        case .imessage: return "iMessage"
-        case .mail:     return "Mail"
+        case .apps:      return "Apps"
+        case .browser:   return "Browser"
+        case .files:     return "Files"
+        case .messages:  return "WhatsApp"
+        case .discord:   return "Discord"
+        case .imessage:  return "iMessage"
+        case .mail:      return "Mail"
+        case .terminal:  return "Terminal"
+        case .clipboard: return "Clipboard"
         }
     }
 }
@@ -34,6 +38,8 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var discordResults: [SearchResult] = []
     @Published private(set) var imessageResults: [SearchResult] = []
     @Published private(set) var mailResults: [SearchResult] = []
+    @Published private(set) var terminalResults: [SearchResult] = []
+    @Published private(set) var clipboardResults: [SearchResult] = []
     @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
     @Published private(set) var isLoading: Bool = false
@@ -48,6 +54,8 @@ final class SearchViewModel: ObservableObject {
     private let discordService: DiscordService
     private let imessageService: AppleMessagesService
     private let mailService: AppleMailService
+    private let terminalService: TerminalHistoryService
+    private let clipboardService: ClipboardHistoryService
     private var cancellables = Set<AnyCancellable>()
     private var currentSearchID = 0
 
@@ -58,7 +66,9 @@ final class SearchViewModel: ObservableObject {
         whatsappService: WhatsAppService = WhatsAppService(),
         discordService: DiscordService = DiscordService(),
         imessageService: AppleMessagesService = AppleMessagesService(),
-        mailService: AppleMailService = AppleMailService()
+        mailService: AppleMailService = AppleMailService(),
+        terminalService: TerminalHistoryService = TerminalHistoryService(),
+        clipboardService: ClipboardHistoryService = ClipboardHistoryService()
     ) {
         self.browserService = browserService
         self.fileService = fileService
@@ -67,6 +77,8 @@ final class SearchViewModel: ObservableObject {
         self.discordService = discordService
         self.imessageService = imessageService
         self.mailService = mailService
+        self.terminalService = terminalService
+        self.clipboardService = clipboardService
 
         $query
             .removeDuplicates()
@@ -76,6 +88,8 @@ final class SearchViewModel: ObservableObject {
 
         Task { [appService] in await appService.warmCache() }
         Task { [discordService] in await discordService.warmCache() }
+        // Start the clipboard history polling loop.
+        Task { [clipboardService] in await clipboardService.start() }
     }
 
     func cycleTab(forward: Bool) {
@@ -89,13 +103,15 @@ final class SearchViewModel: ObservableObject {
 
     func count(for tab: SearchTab) -> Int {
         switch tab {
-        case .apps:     return appResults.count
-        case .browser:  return browserResults.count
-        case .files:    return fileResults.count
-        case .messages: return messageResults.count
-        case .discord:  return discordResults.count
-        case .imessage: return imessageResults.count
-        case .mail:     return mailResults.count
+        case .apps:      return appResults.count
+        case .browser:   return browserResults.count
+        case .files:     return fileResults.count
+        case .messages:  return messageResults.count
+        case .discord:   return discordResults.count
+        case .imessage:  return imessageResults.count
+        case .mail:      return mailResults.count
+        case .terminal:  return terminalResults.count
+        case .clipboard: return clipboardResults.count
         }
     }
 
@@ -105,6 +121,7 @@ final class SearchViewModel: ObservableObject {
             browserResults = []; fileResults = []; appResults = []
             messageResults = []; discordResults = []
             imessageResults = []; mailResults = []
+            terminalResults = []; clipboardResults = []
             results = []; selectedIndex = 0; isLoading = false
             return
         }
@@ -114,14 +131,18 @@ final class SearchViewModel: ObservableObject {
         isLoading = true
 
         Task {
-            async let browser  = browserService.search(query: trimmed)
-            async let files    = fileService.search(query: trimmed)
-            async let apps     = appService.search(query: trimmed)
-            async let whatsapp = whatsappService.search(query: trimmed)
-            async let discord  = discordService.search(query: trimmed)
-            async let imsg     = imessageService.search(query: trimmed)
-            async let mail     = mailService.search(query: trimmed)
-            let (b, f, a, w, d, im, ml) = await (browser, files, apps, whatsapp, discord, imsg, mail)
+            async let browser   = browserService.search(query: trimmed)
+            async let files     = fileService.search(query: trimmed)
+            async let apps      = appService.search(query: trimmed)
+            async let whatsapp  = whatsappService.search(query: trimmed)
+            async let discord   = discordService.search(query: trimmed)
+            async let imsg      = imessageService.search(query: trimmed)
+            async let mail      = mailService.search(query: trimmed)
+            async let terminal  = terminalService.search(query: trimmed)
+            async let clipboard = clipboardService.search(query: trimmed)
+            let (b, f, a, w, d, im, ml, tm, cb) = await (
+                browser, files, apps, whatsapp, discord, imsg, mail, terminal, clipboard
+            )
 
             guard searchID == currentSearchID else { return }
             self.browserResults = b
@@ -131,6 +152,8 @@ final class SearchViewModel: ObservableObject {
             self.discordResults = d
             self.imessageResults = im
             self.mailResults = ml
+            self.terminalResults = tm
+            self.clipboardResults = cb
             self.syncDisplayedResults(resetSelection: true)
             self.isLoading = false
         }
@@ -138,13 +161,15 @@ final class SearchViewModel: ObservableObject {
 
     private func syncDisplayedResults(resetSelection: Bool) {
         switch activeTab {
-        case .apps:     results = appResults
-        case .browser:  results = browserResults
-        case .files:    results = fileResults
-        case .messages: results = messageResults
-        case .discord:  results = discordResults
-        case .imessage: results = imessageResults
-        case .mail:     results = mailResults
+        case .apps:      results = appResults
+        case .browser:   results = browserResults
+        case .files:     results = fileResults
+        case .messages:  results = messageResults
+        case .discord:   results = discordResults
+        case .imessage:  results = imessageResults
+        case .mail:      results = mailResults
+        case .terminal:  results = terminalResults
+        case .clipboard: results = clipboardResults
         }
         if resetSelection { selectedIndex = 0 }
     }
@@ -173,8 +198,6 @@ final class SearchViewModel: ObservableObject {
             return NSWorkspace.shared.open(URL(fileURLWithPath: path))
 
         case .whatsappChat(let jid, let messageText):
-            // Only stage clipboard for message hits (so the user can ⌘F+⌘V
-            // inside WhatsApp). Contact hits leave the clipboard alone.
             if !messageText.isEmpty {
                 let pb = NSPasteboard.general
                 pb.clearContents()
@@ -203,6 +226,12 @@ final class SearchViewModel: ObservableObject {
                 return true
             }
             return NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Messages.app"))
+
+        case .copyToClipboard(let s):
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(s, forType: .string)
+            return true
         }
     }
 
@@ -211,6 +240,7 @@ final class SearchViewModel: ObservableObject {
         browserResults = []; fileResults = []; appResults = []
         messageResults = []; discordResults = []
         imessageResults = []; mailResults = []
+        terminalResults = []; clipboardResults = []
         results = []; selectedIndex = 0; isLoading = false
         activeTab = .apps
     }
