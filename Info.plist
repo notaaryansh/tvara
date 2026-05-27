@@ -26,6 +26,12 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>spotlight++ searches your Desktop so you can find files by name.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>spotlight++ searches your Documents so you can find files by name.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>spotlight++ searches your Downloads so you can find files by name.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key>

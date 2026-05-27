@@ -23,3 +23,10 @@ spotlight++.app/
 
 # Unrelated working files in this directory
 writing-submissions.md
+
+# Secrets — never commit
+.env
+*.env
+.env.swift
+**/.env.swift
+openai_key.txt

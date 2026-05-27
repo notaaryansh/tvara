@@ -48,6 +48,64 @@ actor DiscordService {
         return contacts + messages
     }
 
+    /// Find every message involving a contact by resolving their username
+    /// to a user_id and filtering on that — NOT on content text. Returns
+    /// messages where the contact is the author or the channel recipient
+    /// (i.e., a DM with them). The semantic reranker then orders this pool
+    /// by similarity to the planner's search_term.
+    ///
+    /// Returns the contact-card rows too so the "Open chat with X" shortcut
+    /// stays available alongside the message hits.
+    func messagesInvolving(contactName: String, limit: Int = 200) async -> [SearchResult] {
+        let trimmed = contactName.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 2 else { return [] }
+        guard FileManager.default.fileExists(atPath: cacheDir) else { return [] }
+        await refreshIfNeeded()
+
+        let userIds = resolveUserIds(matching: trimmed)
+        let contactCards = queryContacts(needle: trimmed)
+        guard !userIds.isEmpty else { return contactCards }
+
+        let messages = queryMessagesByUserIds(userIds, limit: limit)
+        return contactCards + messages
+    }
+
+    /// Return every Discord message as a SearchResult, ordered by recency,
+    /// for the semantic reranker to score. Used on no-contact "messages"
+    /// queries — the rerank's similarity floor handles relevance, so the
+    /// pool can safely be the whole index. Result-set is capped to keep
+    /// the cosine pass bounded; the cap is high enough to cover any
+    /// realistic personal-account index.
+    func allMessagesForRerank(limit: Int = 10_000) async -> [SearchResult] {
+        guard FileManager.default.fileExists(atPath: cacheDir) else { return [] }
+        await refreshIfNeeded()
+        let sql = """
+            \(Self.messageSelectPrefix)
+            ORDER BY m.timestamp DESC
+            LIMIT \(limit)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        return drainMessageRows(stmt: stmt)
+    }
+
+    /// All user_ids whose username matches the needle (case-insensitive
+    /// substring). Returns at most 5 to keep the IN-clause bounded.
+    private func resolveUserIds(matching needle: String) -> [String] {
+        var ids: [String] = []
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = "SELECT id FROM users WHERE username LIKE ? COLLATE NOCASE LIMIT 5"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        let pattern = "%\(needle)%"
+        sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT_DC)
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            ids.append(colText(stmt, 0))
+        }
+        return ids
+    }
+
     /// Match against known Discord usernames + guild names. Top-ranked so
     /// they appear above message hits. For users we have a DM channel for,
     /// deep-link straight to the DM; otherwise open the user's profile.
@@ -390,24 +448,70 @@ actor DiscordService {
 
     // MARK: - SQL query
 
+    /// Shared SELECT used by both content-LIKE search and the new contact-id
+    /// filter. The WHERE clause is appended by callers.
+    private static let messageSelectPrefix = """
+        SELECT m.id, m.channel_id, m.author_id, m.content, m.timestamp,
+               c.name AS channel_name, c.guild_id, c.recipient_id, c.type,
+               g.name AS guild_name,
+               recip.username AS recipient_username,
+               author.username AS author_username,
+               av_author.image_data AS author_avatar,
+               av_recip.image_data  AS recipient_avatar,
+               gi.image_data        AS guild_icon
+        FROM messages m
+        LEFT JOIN channels c       ON c.id = m.channel_id
+        LEFT JOIN guilds   g       ON g.id = c.guild_id
+        LEFT JOIN users  recip     ON recip.id = c.recipient_id
+        LEFT JOIN users  author    ON author.id = m.author_id
+        LEFT JOIN avatars av_author ON av_author.user_id = m.author_id
+        LEFT JOIN avatars av_recip  ON av_recip.user_id = c.recipient_id
+        LEFT JOIN guild_icons gi    ON gi.guild_id = c.guild_id
+    """
+
+    /// Messages "involving the contact." Three overlapping conditions are
+    /// unioned because Discord's cache doesn't reliably give us channel
+    /// metadata — so we can't just filter by recipient_id alone:
+    ///   1. messages the contact authored anywhere
+    ///   2. messages in any DM channel whose recipient is the contact
+    ///      (when we DID harvest the channel record)
+    ///   3. messages in any channel where the contact has ever spoken —
+    ///      this rescues the user's OWN sent messages in a DM with the
+    ///      contact when (2) is missing channel metadata. Without this,
+    ///      "what address did I send drish" never sees the user's own
+    ///      address message because the DM channel's recipient_id is NULL.
+    private func queryMessagesByUserIds(_ ids: [String], limit: Int) -> [SearchResult] {
+        guard !ids.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let sql = """
+            WITH contact_channels AS (
+                SELECT DISTINCT channel_id FROM messages
+                WHERE author_id IN (\(placeholders))
+            )
+            \(Self.messageSelectPrefix)
+            WHERE m.author_id IN (\(placeholders))
+               OR c.recipient_id IN (\(placeholders))
+               OR m.channel_id IN (SELECT channel_id FROM contact_channels)
+            ORDER BY m.timestamp DESC
+            LIMIT \(limit)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        // Bind ids three times: CTE author_id, WHERE author_id, WHERE recipient_id.
+        for round in 0..<3 {
+            for (i, id) in ids.enumerated() {
+                sqlite3_bind_text(stmt,
+                    Int32(round * ids.count + i + 1),
+                    id, -1, SQLITE_TRANSIENT_DC)
+            }
+        }
+        return drainMessageRows(stmt: stmt)
+    }
+
     private func querySQL(needle: String, limit: Int) -> [SearchResult] {
         let sql = """
-            SELECT m.id, m.channel_id, m.author_id, m.content, m.timestamp,
-                   c.name AS channel_name, c.guild_id, c.recipient_id, c.type,
-                   g.name AS guild_name,
-                   recip.username AS recipient_username,
-                   author.username AS author_username,
-                   av_author.image_data AS author_avatar,
-                   av_recip.image_data  AS recipient_avatar,
-                   gi.image_data        AS guild_icon
-            FROM messages m
-            LEFT JOIN channels c       ON c.id = m.channel_id
-            LEFT JOIN guilds   g       ON g.id = c.guild_id
-            LEFT JOIN users  recip     ON recip.id = c.recipient_id
-            LEFT JOIN users  author    ON author.id = m.author_id
-            LEFT JOIN avatars av_author ON av_author.user_id = m.author_id
-            LEFT JOIN avatars av_recip  ON av_recip.user_id = c.recipient_id
-            LEFT JOIN guild_icons gi    ON gi.guild_id = c.guild_id
+            \(Self.messageSelectPrefix)
             WHERE m.content LIKE ? COLLATE NOCASE
             ORDER BY m.timestamp DESC
             LIMIT \(limit)
@@ -419,7 +523,12 @@ actor DiscordService {
 
         let pattern = "%\(needle)%"
         sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT_DC)
+        return drainMessageRows(stmt: stmt)
+    }
 
+    /// Materialize SearchResult rows from a prepared statement that follows
+    /// the `messageSelectPrefix` column layout.
+    private func drainMessageRows(stmt: OpaquePointer?) -> [SearchResult] {
         let now = Date()
         var out: [SearchResult] = []
         while sqlite3_step(stmt) == SQLITE_ROW {

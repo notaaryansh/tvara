@@ -1,6 +1,19 @@
 import Foundation
 
 actor FileSearchService {
+    /// Touch the three TCC-protected user folders so macOS fires the
+    /// permission prompts at launch. Without this, our `mdfind` subprocess
+    /// silently inherits a denied TCC context and returns *only* the
+    /// unrestricted paths (e.g. ~/Library/Application Support) — so a
+    /// search for "pitch" surfaces Steam icons but not the PDF on the
+    /// user's Desktop. Reading the directory listing is enough to trip TCC.
+    func warmCache() async {
+        let home = NSHomeDirectory()
+        for folder in ["Desktop", "Documents", "Downloads"] {
+            _ = try? FileManager.default.contentsOfDirectory(atPath: "\(home)/\(folder)")
+        }
+    }
+
     func search(query: String, limit: Int = 25) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }

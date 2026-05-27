@@ -6,6 +6,7 @@ import Carbon.HIToolbox
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: SearchWindowController!
     private var viewModel: SearchViewModel!
+    private var statusItem: NSStatusItem!
 
     static func main() {
         let app = NSApplication.shared
@@ -27,6 +28,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         installMenu()
+        installStatusItem()
+    }
+
+    /// Persistent menu bar presence. Left-click opens the search panel
+    /// (same as ⌘K); right-click shows a menu with Open + Quit so the app
+    /// can be fully terminated without going through `killall`.
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.image = NSImage(
+                systemSymbolName: "magnifyingglass",
+                accessibilityDescription: "spotlight++"
+            )
+            button.image?.isTemplate = true
+            button.target = self
+            button.action = #selector(statusItemClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Open spotlight++",
+                     action: #selector(openSearch),
+                     keyEquivalent: "k")
+        menu.items.last?.keyEquivalentModifierMask = [.command]
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Quit spotlight++",
+                     action: #selector(NSApplication.terminate(_:)),
+                     keyEquivalent: "q")
+        // Attach via menu property only on demand so left-click can do its
+        // own thing — we set/clear it inside statusItemClicked.
+        item.menu = nil
+        self.statusItem = item
+        // Stash the menu on the item via associated object pattern would be
+        // overkill; instead build it again in the handler. It's cheap.
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp {
+            showStatusMenu()
+        } else {
+            windowController.toggle()
+        }
+    }
+
+    private func showStatusMenu() {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Open spotlight++  ⌘K",
+                     action: #selector(openSearch),
+                     keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Quit spotlight++",
+                     action: #selector(NSApplication.terminate(_:)),
+                     keyEquivalent: "q")
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        // Detach so the next plain click opens the panel instead of the menu.
+        statusItem.menu = nil
+    }
+
+    @objc private func openSearch() {
+        windowController.toggle()
     }
 
     private func installMenu() {

@@ -14,10 +14,28 @@ actor AppleMailService {
     private static let refreshLifetime: TimeInterval = 300   // re-scan at most every 5 min
 
     init() {
-        self.mailBase = NSHomeDirectory() + "/Library/Mail"
+        // Both paths can exist on a single Mac:
+        //   - ~/Library/Mail/V*           (legacy, used by Apple Mail
+        //                                  outside its sandbox container —
+        //                                  this is where data actually
+        //                                  lives on most macOS 14 setups)
+        //   - ~/Library/Containers/com.apple.mail/.../Mail  (sandbox husk,
+        //                                  often present but empty)
+        // We pick whichever has versioned subdirectories ("V10", "V11" …)
+        // — those are the only ones that contain real mail data.
+        let home = NSHomeDirectory()
+        let candidates = [
+            home + "/Library/Mail",
+            home + "/Library/Containers/com.apple.mail/Data/Library/Mail",
+        ]
+        self.mailBase = candidates.first { path in
+            guard let contents = try? FileManager.default.contentsOfDirectory(atPath: path) else {
+                return false
+            }
+            return contents.contains { $0.hasPrefix("V") && $0.count <= 4 }
+        } ?? candidates[0]
 
-        let supportDir = NSHomeDirectory()
-            + "/Library/Application Support/spotlight++"
+        let supportDir = home + "/Library/Application Support/spotlight++"
         try? FileManager.default.createDirectory(
             atPath: supportDir, withIntermediateDirectories: true
         )

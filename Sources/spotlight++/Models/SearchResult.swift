@@ -43,6 +43,18 @@ struct SearchResult: Identifiable, Hashable {
         return trimmed.isEmpty ? subtitle : trimmed
     }
 
+    /// Return a copy with a different rank. Used by the semantic reranker
+    /// to encode its ordering into the `rank` field so downstream merge
+    /// sorts in the ViewModel preserve it (they sort by rank, not by the
+    /// array position the reranker produces).
+    func withRank(_ newRank: Int) -> SearchResult {
+        SearchResult(
+            title: title, subtitle: subtitle, source: source, date: date,
+            badge: badge, openTarget: openTarget, rank: newRank,
+            iconData: iconData, senderName: senderName
+        )
+    }
+
     // Hash/equality intentionally exclude iconData — favicons are large and
     // would dominate the hash; identity comes from id alone anyway.
     static func == (lhs: SearchResult, rhs: SearchResult) -> Bool {

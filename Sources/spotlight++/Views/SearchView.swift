@@ -24,10 +24,13 @@ struct SearchView: View {
             if hasQuery {
                 Divider().opacity(0.25)
                 TabStripView(activeTab: $viewModel.activeTab, count: viewModel.count(for:))
+                if viewModel.isAIThinking || viewModel.aiExplanation != nil {
+                    aiBanner
+                }
                 if !viewModel.results.isEmpty {
                     Divider().opacity(0.20)
                     resultsList
-                } else if !viewModel.isLoading {
+                } else if !viewModel.isLoading && !viewModel.isAIThinking {
                     emptyState
                 }
             }
@@ -98,6 +101,32 @@ struct SearchView: View {
                 }
             }
         }
+    }
+
+    private var aiBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(LinearGradient(
+                    colors: [Color.purple, Color.blue],
+                    startPoint: .leading, endPoint: .trailing
+                ))
+            if viewModel.isAIThinking {
+                Text("Thinking…")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                ProgressView().controlSize(.mini).scaleEffect(0.7)
+            } else if let exp = viewModel.aiExplanation {
+                Text(exp)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 7)
+        .background(Color.white.opacity(0.04))
     }
 
     private var emptyState: some View {

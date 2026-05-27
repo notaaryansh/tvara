@@ -14,6 +14,15 @@ actor WhatsAppService {
         self.profilePicDir = groupContainer + "/Media/Profile"
     }
 
+    /// Touch the WhatsApp ChatStorage path so macOS shows the Full Disk
+    /// Access prompt on launch instead of on first search. Cheap — just a
+    /// stat/open call; the file is read-only mapped and immediately closed.
+    func warmCache() async {
+        // FileManager.fileExists alone doesn't always trip TCC; opening for
+        // read is what actually forces the prompt. We discard the handle.
+        _ = try? Data(contentsOf: URL(fileURLWithPath: dbPath), options: [.mappedIfSafe])
+    }
+
     func search(query: String, limit: Int = 30) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         // Don't fire on 1-char queries — too broad, and LIKE '%a%' would
