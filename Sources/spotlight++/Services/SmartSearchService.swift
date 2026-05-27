@@ -122,6 +122,190 @@ actor SmartSearchService {
         }
     }
 
+    /// Plan a compose action from a free-form intent + the content the user
+    /// was acting on. The planner decides whether to return a message-send
+    /// or a calendar-event action. Caller switches on ComposeKind.
+    func planAction(intent: String, sourceContent: String) async throws -> ComposeKind {
+        guard let key = loadKey() else { throw SmartSearchError.noAPIKey }
+
+        var request = URLRequest(url: Self.endpoint)
+        request.httpMethod = "POST"
+        request.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+
+        // Give the model a stable "now" so relative times like "tomorrow"
+        // resolve correctly without depending on its training-date drift.
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let nowISO = iso.string(from: Date())
+
+        let userMsg = """
+        Current time: \(nowISO)
+
+        Selected content:
+        \(sourceContent.prefix(800))
+
+        Action intent:
+        \(intent)
+        """
+
+        let body: [String: Any] = [
+            "model": Self.model,
+            "messages": [
+                ["role": "system", "content": Self.actionSystemPrompt],
+                ["role": "user",   "content": userMsg]
+            ],
+            "response_format": ["type": "json_object"],
+            "reasoning_effort": Self.reasoningEffort
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw SmartSearchError.apiError(body.prefix(200).description)
+        }
+
+        let envelope = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
+        guard let content = envelope.choices.first?.message.content,
+              let planData = content.data(using: .utf8) else {
+            throw SmartSearchError.parseError("no content in action plan")
+        }
+
+        // The model returns either a message envelope or an event envelope.
+        // Discriminated by the "type" field at the top of the JSON.
+        struct Discriminator: Decodable { let type: String }
+        let kind = try JSONDecoder().decode(Discriminator.self, from: planData)
+
+        switch kind.type.lowercased() {
+        case "message":
+            struct Raw: Decodable {
+                let platform: String
+                let recipient: String
+                let content: String
+            }
+            let raw = try JSONDecoder().decode(Raw.self, from: planData)
+            guard let platform = ComposePlatform(rawValue: raw.platform.lowercased()) else {
+                throw SmartSearchError.parseError("unknown platform: \(raw.platform)")
+            }
+            return .sendMessage(MessageAction(
+                platform: platform,
+                recipientName: raw.recipient,
+                content: raw.content,
+                contactAvatar: nil
+            ))
+
+        case "event":
+            struct Raw: Decodable {
+                let title: String
+                let start_date: String        // ISO 8601
+                let duration_minutes: Int?
+                let attendees: [String]?
+                let location: String?
+                let notes: String?
+            }
+            let raw = try JSONDecoder().decode(Raw.self, from: planData)
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var startDate = iso.date(from: raw.start_date)
+            if startDate == nil {
+                let basic = ISO8601DateFormatter()
+                basic.formatOptions = [.withInternetDateTime]
+                startDate = basic.date(from: raw.start_date)
+            }
+            guard let start = startDate else {
+                throw SmartSearchError.parseError("bad start_date: \(raw.start_date)")
+            }
+            return .createEvent(EventAction(
+                title: raw.title,
+                startDate: start,
+                durationMinutes: raw.duration_minutes ?? 60,
+                attendees: raw.attendees ?? [],
+                location: raw.location ?? "",
+                notes: raw.notes ?? ""
+            ))
+
+        default:
+            throw SmartSearchError.parseError("unknown action type: \(kind.type)")
+        }
+    }
+
+    private static let actionSystemPrompt = """
+    You convert a user's free-form action intent into a structured JSON
+    plan. Two action types are supported. Respond ONLY with one JSON
+    object — no other text. The first field is always "type", which is
+    either "message" or "event".
+
+    ─── Type "message" — for sending a message ─────────────────────────────
+    {
+      "type": "message",
+      "platform": "whatsapp" | "imessage" | "discord" | "mail",
+      "recipient": "<contact name as written by the user, no titles>",
+      "content": "<the message body to pre-populate the compose box>"
+    }
+
+    ─── Type "event" — for creating a calendar event ───────────────────────
+    {
+      "type": "event",
+      "title": "<short event title>",
+      "start_date": "<ISO 8601 absolute datetime with tz, e.g. 2026-05-28T15:00:00Z>",
+      "duration_minutes": <int, default 60>,
+      "attendees": ["name1", "name2"],
+      "location": "<optional location string, or empty>",
+      "notes": "<optional context for the description, or empty>"
+    }
+
+    Picking the type:
+    - "send/text/email/message/dm/whatsapp/imessage" → message
+    - "meeting/event/calendar/invite/schedule/book/set up a call" → event
+    - When ambiguous, prefer message.
+
+    Message rules:
+    - "platform" defaults to "whatsapp" when not specified.
+    - "content" should be short (1-3 sentences), conversational. Rephrase
+      "this" into a sendable form rather than copying verbatim. Don't
+      include greetings or the recipient's name as a salutation.
+    - Explicit messages ("send drishtu hi") are used verbatim.
+
+    Event rules:
+    - "start_date" MUST be ISO 8601 with a Z or ±offset. Resolve relative
+      times ("tomorrow at 3pm", "next monday morning") against the
+      "Current time" header in the user message. Assume local timezone if
+      none specified, and emit with the local offset.
+    - "duration_minutes" defaults to 60 if not specified. Common values:
+      15, 30, 45, 60, 90, 120.
+    - "attendees" is a list of contact names as written; resolve to
+      addresses later. Always include the people the user mentioned.
+    - "notes" should briefly capture what the meeting is about. If the
+      intent says "about this", use the selected content as context but
+      summarize it (don't paste raw).
+
+    Examples:
+
+    Selected: "625 Leavenworth St, San Francisco, CA 94109"
+    Intent:   "send a message to drishtu on whatsapp about this"
+    →
+    {"type":"message","platform":"whatsapp","recipient":"drishtu","content":"Here's the address: 625 Leavenworth St, San Francisco, CA 94109"}
+
+    Selected: "(any content)"
+    Intent:   "email mom saying happy birthday"
+    →
+    {"type":"message","platform":"mail","recipient":"mom","content":"Happy birthday!"}
+
+    Current time: 2026-05-27T11:00:00-07:00
+    Selected: "we should chat about the modding tool"
+    Intent:   "set up a 30min meeting with drishtu tomorrow at 3pm about this"
+    →
+    {"type":"event","title":"Modding tool discussion","start_date":"2026-05-28T15:00:00-07:00","duration_minutes":30,"attendees":["drishtu"],"location":"","notes":"Chat about the modding tool."}
+
+    Current time: 2026-05-27T11:00:00-07:00
+    Selected: "(any content)"
+    Intent:   "book a 1hr coffee with jamie next thursday at 10am at blue bottle"
+    →
+    {"type":"event","title":"Coffee with Jamie","start_date":"2026-06-04T10:00:00-07:00","duration_minutes":60,"attendees":["jamie"],"location":"Blue Bottle","notes":""}
+    """
+
     // MARK: - Key handling
 
     private func loadKey() -> String? {

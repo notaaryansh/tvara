@@ -62,6 +62,8 @@ struct SearchResultRow: View {
             messageAvatar(platformBadge: Self.messagesBadgeIcon)
         case .copyToClipboard:
             tintedBadge
+        case .notesNote:
+            tintedBadge   // Notes source already has its yellow tint + note.text icon
         case .url:
             if isDiscord {
                 messageAvatar(platformBadge: Self.discordBadgeIcon)

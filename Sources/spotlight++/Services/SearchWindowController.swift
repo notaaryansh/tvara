@@ -83,8 +83,27 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
                   let window = self.window,
                   window.isKeyWindow else { return event }
 
+            // While the compose panel is showing, hand everything except
+            // Escape (cancel) and ⌘↩ (send) through to SwiftUI so the
+            // TextEditor + button shortcuts work natively.
+            if self.viewModel.composeState != nil {
+                switch Int(event.keyCode) {
+                case kVK_Escape:
+                    self.viewModel.cancelCompose()
+                    return nil
+                default:
+                    return event
+                }
+            }
+
             switch Int(event.keyCode) {
             case kVK_Escape:
+                // In acting mode without a compose panel yet, Esc backs out
+                // of acting rather than dismissing the whole window.
+                if self.viewModel.actingOn != nil {
+                    self.viewModel.cancelCompose()
+                    return nil
+                }
                 self.hide()
                 return nil
             case kVK_DownArrow:
@@ -94,6 +113,21 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
                 self.viewModel.moveSelection(by: -1)
                 return nil
             case kVK_Return, kVK_ANSI_KeypadEnter:
+                // In acting mode the typed text is an action intent, not a
+                // search query — submit it to the planner.
+                if self.viewModel.actingOn != nil {
+                    self.viewModel.submitActionIntent()
+                    return nil
+                }
+                // ⌘↩ on a selected result enters acting mode instead of
+                // opening it. Plain ↩ keeps the existing open-on-selected
+                // behavior so the launcher still works the old way.
+                if event.modifierFlags.contains(.command),
+                   self.viewModel.results.indices.contains(self.viewModel.selectedIndex) {
+                    let r = self.viewModel.results[self.viewModel.selectedIndex]
+                    self.viewModel.beginActing(on: r)
+                    return nil
+                }
                 if self.viewModel.openSelected() { self.hide() }
                 return nil
             case kVK_Tab:

@@ -30,6 +30,7 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var discordResults: [SearchResult] = []
     @Published private(set) var imessageResults: [SearchResult] = []
     @Published private(set) var mailResults: [SearchResult] = []
+    @Published private(set) var notesResults: [SearchResult] = []
     @Published private(set) var clipboardResults: [SearchResult] = []
     @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
@@ -40,6 +41,14 @@ final class SearchViewModel: ObservableObject {
         didSet { if oldValue != activeTab { syncDisplayedResults(resetSelection: true) } }
     }
 
+    /// Compose flow: nil = normal search. When non-nil, the SearchView swaps
+    /// the results area for the ComposeView. `actingOn` is set when the user
+    /// has selected a result and pressed ⌘↩ to "act on" it — they then type
+    /// an intent (e.g. "send drishtu a message about this") that gets routed
+    /// through SmartSearchService.planAction and lands in `composeState`.
+    @Published var composeState: ComposeState? = nil
+    @Published private(set) var actingOn: SearchResult? = nil
+
     private let browserService: BrowserDatabaseService
     private let fileService: FileSearchService
     private let appService: AppSearchService
@@ -47,6 +56,7 @@ final class SearchViewModel: ObservableObject {
     private let discordService: DiscordService
     private let imessageService: AppleMessagesService
     private let mailService: AppleMailService
+    private let notesService: AppleNotesService
     private let clipboardService: ClipboardHistoryService
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
@@ -74,6 +84,7 @@ final class SearchViewModel: ObservableObject {
         discordService: DiscordService = DiscordService(),
         imessageService: AppleMessagesService = AppleMessagesService(),
         mailService: AppleMailService = AppleMailService(),
+        notesService: AppleNotesService = AppleNotesService(),
         clipboardService: ClipboardHistoryService = ClipboardHistoryService(),
         smartService: SmartSearchService = SmartSearchService(),
         embeddingStore: EmbeddingStore = EmbeddingStore()
@@ -85,6 +96,7 @@ final class SearchViewModel: ObservableObject {
         self.discordService = discordService
         self.imessageService = imessageService
         self.mailService = mailService
+        self.notesService = notesService
         self.clipboardService = clipboardService
         self.smartService = smartService
         self.embeddingStore = embeddingStore
@@ -106,6 +118,7 @@ final class SearchViewModel: ObservableObject {
         Task { [mailService] in await mailService.warmCache() }
         Task { [smartService] in await smartService.warmCache() }
         Task { [fileService] in await fileService.warmCache() }
+        Task { [notesService] in await notesService.warmCache() }
     }
 
     // MARK: - Tabs
@@ -139,7 +152,7 @@ final class SearchViewModel: ObservableObject {
         guard !trimmed.isEmpty else {
             browserResults = []; fileResults = []; appResults = []
             whatsappResults = []; discordResults = []
-            imessageResults = []; mailResults = []
+            imessageResults = []; mailResults = []; notesResults = []
             clipboardResults = []
             results = []; selectedIndex = 0
             isLoading = false; isAIThinking = false; aiExplanation = nil
@@ -181,9 +194,10 @@ final class SearchViewModel: ObservableObject {
         async let discord   = discordService.search(query: query)
         async let imsg      = imessageService.search(query: query)
         async let mail      = mailService.search(query: query)
+        async let notes     = notesService.search(query: query)
         async let clipboard = clipboardService.search(query: query)
-        let (b, f, a, w, d, im, ml, cb) = await (
-            browser, files, apps, whatsapp, discord, imsg, mail, clipboard
+        let (b, f, a, w, d, im, ml, nt, cb) = await (
+            browser, files, apps, whatsapp, discord, imsg, mail, notes, clipboard
         )
 
         guard searchID == currentSearchID else { return }
@@ -194,6 +208,7 @@ final class SearchViewModel: ObservableObject {
         self.discordResults = d
         self.imessageResults = im
         self.mailResults = ml
+        self.notesResults = nt
         self.clipboardResults = cb
         self.syncDisplayedResults(resetSelection: true)
         self.isLoading = false
@@ -281,6 +296,7 @@ final class SearchViewModel: ObservableObject {
             self.browserResults = []
             self.fileResults = []
             self.mailResults = []
+            self.notesResults = []
             self.clipboardResults = []
             self.syncDisplayedResults(resetSelection: true)
             self.isLoading = false
@@ -309,6 +325,7 @@ final class SearchViewModel: ObservableObject {
             self.browserResults = []
             self.fileResults = []
             self.mailResults = []
+            self.notesResults = []
             self.clipboardResults = []
             self.syncDisplayedResults(resetSelection: true)
             self.isLoading = false
@@ -439,7 +456,7 @@ final class SearchViewModel: ObservableObject {
         merged.reserveCapacity(
             appResults.count + browserResults.count + fileResults.count
             + whatsappResults.count + discordResults.count + imessageResults.count
-            + mailResults.count + clipboardResults.count
+            + mailResults.count + notesResults.count + clipboardResults.count
         )
         merged.append(contentsOf: appResults)
         merged.append(contentsOf: browserResults)
@@ -448,6 +465,7 @@ final class SearchViewModel: ObservableObject {
         merged.append(contentsOf: discordResults)
         merged.append(contentsOf: imessageResults)
         merged.append(contentsOf: mailResults)
+        merged.append(contentsOf: notesResults)
         merged.append(contentsOf: clipboardResults)
         return merged.sorted(by: rankSort)
     }
@@ -547,17 +565,228 @@ final class SearchViewModel: ObservableObject {
             pb.clearContents()
             pb.setString(s, forType: .string)
             return true
+
+        case .notesNote(let title):
+            // Apple Notes has no stable external per-note deep link, so we
+            // copy the title to the clipboard and open Notes.app — the user
+            // can ⌘F + ⌘V to jump to the note. Same fallback pattern we use
+            // for iMessage chats.
+            if !title.isEmpty {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(title, forType: .string)
+            }
+            return NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Notes.app"))
         }
+    }
+
+    // MARK: - Compose flow
+
+    /// Enter acting mode for a result. The search bar's next Enter becomes
+    /// an action intent (not a search). UI shows a context card with the
+    /// result snippet so the user can see what they're acting on.
+    func beginActing(on result: SearchResult) {
+        actingOn = result
+        composeState = nil
+        query = ""
+        results = []
+        aiExplanation = nil
+    }
+
+    /// Called when the user submits an action intent in acting mode.
+    /// Routes through SmartSearchService.planAction → fills composeState.
+    func submitActionIntent() {
+        guard let source = actingOn else { return }
+        let intent = query.trimmingCharacters(in: .whitespaces)
+        guard !intent.isEmpty else { return }
+
+        let sourceContent = source.subtitle.isEmpty ? source.title : source.subtitle
+        composeState = ComposeState(
+            sourceSnippet: sourceContent, stage: .planning, kind: nil
+        )
+
+        Task { [smartService, whatsappService, discordService, imessageService] in
+            let kind: ComposeKind
+            do {
+                kind = try await smartService.planAction(
+                    intent: intent, sourceContent: sourceContent
+                )
+            } catch {
+                // On planner failure, fall back to an empty message stub
+                // so the user still sees a compose panel they can edit.
+                self.composeState = ComposeState(
+                    sourceSnippet: sourceContent,
+                    stage: .ready,
+                    kind: .sendMessage(MessageAction(
+                        platform: .whatsapp,
+                        recipientName: "",
+                        content: sourceContent,
+                        contactAvatar: nil
+                    ))
+                )
+                return
+            }
+
+            // Enrich the message variant with a contact avatar; event
+            // variant doesn't need enrichment beyond what the planner gave.
+            let enriched: ComposeKind
+            switch kind {
+            case .sendMessage(var msg):
+                msg.contactAvatar = await Self.resolveContactAvatar(
+                    name: msg.recipientName,
+                    platform: msg.platform,
+                    whatsapp: whatsappService,
+                    discord: discordService,
+                    imessage: imessageService
+                )
+                enriched = .sendMessage(msg)
+            case .createEvent:
+                enriched = kind
+            }
+            self.composeState = ComposeState(
+                sourceSnippet: sourceContent, stage: .ready, kind: enriched
+            )
+        }
+    }
+
+    func updateComposeContent(_ s: String) {
+        guard var state = composeState, case .sendMessage(var msg) = state.kind else { return }
+        msg.content = s
+        state.kind = .sendMessage(msg)
+        composeState = state
+    }
+
+    /// Field-by-field setters the CalendarComposeView uses to round-trip
+    /// edits back into the published state.
+    func updateEventTitle(_ s: String)        { updateEvent { $0.title = s } }
+    func updateEventStartDate(_ d: Date)      { updateEvent { $0.startDate = d } }
+    func updateEventDuration(_ n: Int)        { updateEvent { $0.durationMinutes = n } }
+    func updateEventLocation(_ s: String)     { updateEvent { $0.location = s } }
+    func updateEventNotes(_ s: String)        { updateEvent { $0.notes = s } }
+    func updateEventAttendees(_ a: [String])  { updateEvent { $0.attendees = a } }
+
+    private func updateEvent(_ mutate: (inout EventAction) -> Void) {
+        guard var state = composeState, case .createEvent(var ev) = state.kind else { return }
+        mutate(&ev)
+        state.kind = .createEvent(ev)
+        composeState = state
+    }
+
+    /// Confirm: ready → sending → sent → reset. Real-action paths:
+    ///   - iMessage: AppleScript through Messages.app (Automation TCC).
+    ///   - Event:    EventKit save to the default calendar (Calendar TCC).
+    /// Other platforms are UI-only for now so the demo still flows.
+    func confirmSend() {
+        guard var state = composeState, state.stage == .ready,
+              let kind = state.kind
+        else { return }
+        state.stage = .sending
+        composeState = state
+
+        let imsg = imessageService
+
+        Task { @MainActor in
+            var sentOk = true
+
+            switch kind {
+            case .sendMessage(let msg):
+                if msg.platform == .imessage {
+                    sentOk = await Self.sendIMessage(
+                        recipientName: msg.recipientName,
+                        content: msg.content,
+                        service: imsg
+                    )
+                } else {
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                }
+            case .createEvent(let ev):
+                sentOk = await Task.detached {
+                    do {
+                        try await CalendarEventSaver.save(ev)
+                        return true
+                    } catch {
+                        return false
+                    }
+                }.value
+            }
+
+            guard var s = composeState, s.stage == .sending else { return }
+            s.stage = sentOk ? .sent : .ready   // fail = bounce back to editable
+            composeState = s
+            guard sentOk else { return }
+
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            cancelCompose()
+        }
+    }
+
+    /// Look up the recipient's iMessage handle by reusing the existing
+    /// chat.db search — first message hit's `imessageChat(handle:)` carries
+    /// the handle we need. Then drive Messages.app via AppleScript.
+    private static func sendIMessage(
+        recipientName: String,
+        content: String,
+        service: AppleMessagesService
+    ) async -> Bool {
+        guard !recipientName.isEmpty, !content.isEmpty else { return false }
+        let results = await service.search(query: recipientName)
+        // Pick the first result whose openTarget exposes a non-empty handle.
+        var handle = ""
+        for r in results {
+            if case .imessageChat(let h, _) = r.openTarget, !h.isEmpty {
+                handle = h
+                break
+            }
+        }
+        guard !handle.isEmpty else { return false }
+        return await Task.detached {
+            do {
+                try IMessageSender.send(to: handle, text: content)
+                return true
+            } catch {
+                return false
+            }
+        }.value
+    }
+
+    /// Discard the compose flow entirely and return to a clean search state.
+    func cancelCompose() {
+        composeState = nil
+        actingOn = nil
+        query = ""
+        results = []
+    }
+
+    /// Best-effort avatar lookup. We do a quick `search(query: name)` on
+    /// the appropriate service and pull `iconData` off the first hit that
+    /// has one. Cheap (~50ms) and runs off the main actor.
+    private static func resolveContactAvatar(
+        name: String,
+        platform: ComposePlatform,
+        whatsapp: WhatsAppService,
+        discord: DiscordService,
+        imessage: AppleMessagesService
+    ) async -> Data? {
+        guard !name.isEmpty else { return nil }
+        let results: [SearchResult]
+        switch platform {
+        case .whatsapp: results = await whatsapp.search(query: name)
+        case .imessage: results = await imessage.search(query: name)
+        case .discord:  results = await discord.search(query: name)
+        case .mail:     return nil
+        }
+        return results.first(where: { $0.iconData != nil })?.iconData
     }
 
     func reset() {
         query = ""
         browserResults = []; fileResults = []; appResults = []
         whatsappResults = []; discordResults = []
-        imessageResults = []; mailResults = []
+        imessageResults = []; mailResults = []; notesResults = []
         clipboardResults = []
         results = []; selectedIndex = 0
         isLoading = false; isAIThinking = false; aiExplanation = nil
         activeTab = .all
+        composeState = nil; actingOn = nil
     }
 }

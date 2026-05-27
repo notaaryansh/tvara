@@ -32,6 +32,12 @@
     <string>spotlight++ searches your Documents so you can find files by name.</string>
     <key>NSDownloadsFolderUsageDescription</key>
     <string>spotlight++ searches your Downloads so you can find files by name.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>spotlight++ uses AppleScript to send iMessages from the compose panel.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>spotlight++ creates calendar events from the compose panel.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>spotlight++ creates calendar events from the compose panel.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key>

@@ -20,8 +20,20 @@ struct SearchView: View {
 
     private var bubble: some View {
         VStack(spacing: 0) {
+            // In acting mode the context "reply pill" lives ABOVE the input
+            // so the visual hierarchy reads top→bottom: what you're acting
+            // on → where you type → results.
+            if viewModel.actingOn != nil && viewModel.composeState == nil {
+                actingContextCard
+            }
             searchBar
-            if hasQuery {
+            if viewModel.composeState != nil {
+                Divider().opacity(0.25)
+                ComposeView(viewModel: viewModel)
+            } else if viewModel.actingOn != nil {
+                Divider().opacity(0.20)
+                actingFooter
+            } else if hasQuery {
                 Divider().opacity(0.25)
                 TabStripView(activeTab: $viewModel.activeTab, count: viewModel.count(for:))
                 if viewModel.isAIThinking || viewModel.aiExplanation != nil {
@@ -55,14 +67,17 @@ struct SearchView: View {
 
     private var searchBar: some View {
         HStack(spacing: 14) {
+            // Keep the magnifying glass; subtle purple tint while acting
+            // signals the mode change without hijacking the whole bar.
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 20, weight: .regular))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isActing ? Color.purple.opacity(0.85) : Color.secondary)
 
-            TextField("Search history, files, and folders", text: $viewModel.query)
+            TextField(searchBarPlaceholder, text: $viewModel.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
                 .focused($isSearchFocused)
+                .disabled(viewModel.composeState != nil)
 
             if viewModel.isLoading {
                 ProgressView()
@@ -72,6 +87,85 @@ struct SearchView: View {
         }
         .padding(.horizontal, 22)
         .frame(height: 64)
+    }
+
+    private var isActing: Bool {
+        viewModel.actingOn != nil && viewModel.composeState == nil
+    }
+
+    private var searchBarPlaceholder: String {
+        if isActing { return "Tell me what to do with this…" }
+        return ""
+    }
+
+    /// iMessage-reply-pill style above the search field. Slim left accent
+    /// in the source's color, neutral background, compact horizontal layout.
+    /// Way calmer than the gradient version.
+    private var actingContextCard: some View {
+        let result = viewModel.actingOn
+        let snippet = (result?.subtitle.isEmpty == false ? result!.subtitle : (result?.title ?? ""))
+        let sourceName = result?.source.rawValue ?? ""
+        let accent = result?.source.tint ?? Color.purple
+
+        return HStack(alignment: .center, spacing: 12) {
+            // Slim left accent in the source's color.
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(accent.opacity(0.85))
+                .frame(width: 3, height: 28)
+
+            // Source icon for context.
+            Image(systemName: result?.source.icon ?? "doc.text")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(accent.opacity(0.9))
+                .frame(width: 16, height: 16)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("From \(sourceName)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                Text(snippet)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 12)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.025))
+    }
+
+    /// Thin status-bar style footer under the input when acting, showing
+    /// the keyboard hints in a quiet way (no gradient, no shouting).
+    private var actingFooter: some View {
+        HStack(spacing: 14) {
+            shortcutHint(key: "⏎", label: "submit")
+            shortcutHint(key: "esc", label: "cancel")
+            Spacer()
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.02))
+    }
+
+    private func shortcutHint(key: String, label: String) -> some View {
+        HStack(spacing: 5) {
+            Text(key)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                )
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
     }
 
     private var resultsList: some View {

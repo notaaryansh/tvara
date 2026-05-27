@@ -65,7 +65,82 @@ actor AppleMessagesService {
             try? FileManager.default.removeItem(atPath: tmpShm)
         }
 
-        return querySQL(chatDbPath: tmpDb, query: trimmed, limit: limit)
+        let contacts = queryContactCards(chatDbPath: tmpDb, query: trimmed)
+        let messages = querySQL(chatDbPath: tmpDb, query: trimmed, limit: limit)
+        return contacts + messages
+    }
+
+    /// Top-ranked "Open iMessage chat" cards for any chat whose display
+    /// name or handle (email address) matches the needle. Phone-only
+    /// contacts won't surface here because chat.db doesn't carry the
+    /// contact's name — that lives in Contacts.app (separate TCC). When
+    /// we wire that in, this method gets the name-resolved path too.
+    private func queryContactCards(chatDbPath: String, query: String) -> [SearchResult] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(chatDbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        // For each distinct contact, pick the best display name + the most
+        // recent message timestamp so we can show "x days ago" on the card.
+        // We dedupe by handle so the same person doesn't appear twice
+        // (once via display_name match, once via handle match).
+        let sql = """
+            SELECT
+                h.id AS handle,
+                COALESCE(NULLIF(c.display_name, ''), h.id) AS chat_name,
+                c.chat_identifier,
+                MAX(m.date) AS last_msg_date
+            FROM chat c
+            LEFT JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+            LEFT JOIN handle h ON h.ROWID = chj.handle_id
+            LEFT JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
+            LEFT JOIN message m ON m.ROWID = cmj.message_id
+            WHERE h.id LIKE ? COLLATE NOCASE
+               OR c.display_name LIKE ? COLLATE NOCASE
+               OR c.chat_identifier LIKE ? COLLATE NOCASE
+            GROUP BY h.id
+            ORDER BY last_msg_date DESC
+            LIMIT 6
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let pattern = "%\(query)%"
+        for i in 1...3 {
+            sqlite3_bind_text(stmt, Int32(i), pattern, -1, SQLITE_TRANSIENT_IM)
+        }
+
+        var out: [SearchResult] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let handle   = colTextOptional(stmt, 0) ?? ""
+            let chatName = colTextOptional(stmt, 1) ?? ""
+            let chatId   = colTextOptional(stmt, 2) ?? ""
+            let lastDate = sqlite3_column_int64(stmt, 3)
+
+            // Skip chats we can't deep-link into (no usable handle/identifier).
+            let openHandle = !handle.isEmpty ? handle
+                : (chatId.starts(with: "chat") ? "" : chatId)
+            guard !openHandle.isEmpty else { continue }
+
+            let title = displayName(chatName: chatName, chatIdentifier: chatId, handle: handle)
+            let date  = lastDate > 0 ? Self.appleDateToDate(lastDate) : nil
+
+            out.append(SearchResult(
+                title: title,
+                subtitle: "Open iMessage chat",
+                source: .imessage,
+                date: date,
+                badge: nil,
+                openTarget: .imessageChat(handle: openHandle, messageText: ""),
+                rank: 1_000
+            ))
+        }
+        return out
     }
 
     // MARK: - Refresh / build decoded-text cache

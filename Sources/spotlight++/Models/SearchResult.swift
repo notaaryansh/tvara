@@ -77,6 +77,10 @@ struct SearchResult: Identifiable, Hashable {
         /// Just copy a string to the system clipboard. Used for terminal
         /// commands and prior clipboard entries.
         case copyToClipboard(String)
+        /// Open Apple Notes.app and copy the note title to the clipboard so
+        /// the user can ⌘F + ⌘V to find it. Apple doesn't expose a stable
+        /// per-note deep link from outside the app.
+        case notesNote(title: String)
     }
 
     enum Source: String, CaseIterable {
@@ -93,6 +97,7 @@ struct SearchResult: Identifiable, Hashable {
         case mail      = "Mail"
         case terminal  = "Terminal"
         case clipboard = "Clipboard"
+        case notes     = "Notes"
 
         var icon: String {
             switch self {
@@ -109,6 +114,7 @@ struct SearchResult: Identifiable, Hashable {
             case .mail:      return "envelope.fill"
             case .terminal:  return "terminal.fill"
             case .clipboard: return "doc.on.clipboard.fill"
+            case .notes:     return "note.text"
             }
         }
 
@@ -127,6 +133,7 @@ struct SearchResult: Identifiable, Hashable {
             case .mail:      return Color(red: 0.16, green: 0.45, blue: 0.95)
             case .terminal:  return Color(red: 0.20, green: 0.20, blue: 0.22)
             case .clipboard: return Color(red: 0.55, green: 0.55, blue: 0.60)
+            case .notes:     return Color(red: 0.98, green: 0.78, blue: 0.27)   // Notes yellow
             }
         }
     }
