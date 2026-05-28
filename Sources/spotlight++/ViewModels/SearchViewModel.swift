@@ -31,6 +31,9 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var imessageResults: [SearchResult] = []
     @Published private(set) var mailResults: [SearchResult] = []
     @Published private(set) var notesResults: [SearchResult] = []
+    @Published private(set) var notionResults: [SearchResult] = []
+    @Published private(set) var linearResults: [SearchResult] = []
+    @Published private(set) var spotifyResults: [SearchResult] = []
     @Published private(set) var clipboardResults: [SearchResult] = []
     @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
@@ -57,6 +60,9 @@ final class SearchViewModel: ObservableObject {
     private let imessageService: AppleMessagesService
     private let mailService: AppleMailService
     private let notesService: AppleNotesService
+    private let notionService: NotionService
+    private let linearService: LinearService
+    private let spotifyService: SpotifyService
     private let clipboardService: ClipboardHistoryService
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
@@ -65,6 +71,11 @@ final class SearchViewModel: ObservableObject {
     // by adding back the async let + a SearchTab case.
     private var cancellables = Set<AnyCancellable>()
     private var currentSearchID = 0
+    /// Latest in-flight smart-search task. Cancelled when a new search
+    /// starts so we (a) stop paying for stale OpenAI calls and (b) avoid
+    /// the "Thinking…" spinner pile-up where older tasks leave the flag
+    /// set true.
+    private var inflightSmartTask: Task<Void, Never>?
 
     private static let allTabResultCap = 60
     private static let messagesTabResultCap = 50
@@ -85,6 +96,9 @@ final class SearchViewModel: ObservableObject {
         imessageService: AppleMessagesService = AppleMessagesService(),
         mailService: AppleMailService = AppleMailService(),
         notesService: AppleNotesService = AppleNotesService(),
+        notionService: NotionService = NotionService(),
+        linearService: LinearService = LinearService(),
+        spotifyService: SpotifyService = SpotifyService(),
         clipboardService: ClipboardHistoryService = ClipboardHistoryService(),
         smartService: SmartSearchService = SmartSearchService(),
         embeddingStore: EmbeddingStore = EmbeddingStore()
@@ -97,6 +111,9 @@ final class SearchViewModel: ObservableObject {
         self.imessageService = imessageService
         self.mailService = mailService
         self.notesService = notesService
+        self.notionService = notionService
+        self.linearService = linearService
+        self.spotifyService = spotifyService
         self.clipboardService = clipboardService
         self.smartService = smartService
         self.embeddingStore = embeddingStore
@@ -119,6 +136,15 @@ final class SearchViewModel: ObservableObject {
         Task { [smartService] in await smartService.warmCache() }
         Task { [fileService] in await fileService.warmCache() }
         Task { [notesService] in await notesService.warmCache() }
+        Task { [notionService] in await notionService.warmCache() }
+        // Calendar (EventKit) — used by Create Event in compose.
+        Task { await CalendarEventSaver.warmAccess() }
+        // Automation (Apple Events) → Messages.app — used by real iMessage
+        // send. Runs on a detached task because AEDeterminePermission may
+        // block until the user dismisses the TCC dialog.
+        Task.detached { IMessageSender.warmAccess() }
+        // Automation → Spotify.app — used by playlist shuffle-play.
+        Task.detached { SpotifyPlayer.warmAccess() }
     }
 
     // MARK: - Tabs
@@ -153,6 +179,7 @@ final class SearchViewModel: ObservableObject {
             browserResults = []; fileResults = []; appResults = []
             whatsappResults = []; discordResults = []
             imessageResults = []; mailResults = []; notesResults = []
+            notionResults = []; linearResults = []; spotifyResults = []
             clipboardResults = []
             results = []; selectedIndex = 0
             isLoading = false; isAIThinking = false; aiExplanation = nil
@@ -163,17 +190,41 @@ final class SearchViewModel: ObservableObject {
         let searchID = currentSearchID
         isLoading = true
 
+        // Static intent shortcut: queries like "open project tracker in
+        // notion" or "open tickets in linear" are routed straight to the
+        // matching service. The trigger word ("notion", "linear", etc.)
+        // is stripped along with filler words; what survives becomes the
+        // needle. Cheap + reliable — no LLM call needed for these.
+        switch Self.detectAppIntent(query: trimmed) {
+        case .notion(let needle):
+            Task { await self.runAppOnly(.notion, needle: needle, searchID: searchID) }
+            return
+        case .linear(let needle):
+            Task { await self.runAppOnly(.linear, needle: needle, searchID: searchID) }
+            return
+        case .spotify(let needle):
+            Task { await self.runAppOnly(.spotify, needle: needle, searchID: searchID) }
+            return
+        case .none:
+            break
+        }
+
         // Decide once at search-start whether this query is "sentence-like"
         // enough to spend an LLM call on. The check itself is sync + cheap;
         // availability check is sync after the first call (it caches).
         let smart = smartService
         // Heuristic is sync + nonisolated; key availability requires actor hop.
         let heuristic = smart.shouldUseSmartSearch(query: trimmed)
-        Task {
+        // Cancel any prior in-flight smart task so we (a) don't pile up
+        // OpenAI calls (each was ~$0.001 wasted before) and (b) keep
+        // isAIThinking semantically tied to ONE active query at a time.
+        inflightSmartTask?.cancel()
+        inflightSmartTask = Task {
             var useSmart = false
             if heuristic {
                 useSmart = await smart.isAvailable()
             }
+            if Task.isCancelled { return }
 
             if useSmart {
                 await self.runSmartSearch(query: trimmed, searchID: searchID)
@@ -183,6 +234,112 @@ final class SearchViewModel: ObservableObject {
                 self.isAIThinking = false
             }
         }
+    }
+
+    /// Known third-party apps we route directly when their name appears in
+    /// the query. The string is the trigger keyword (must be present as a
+    /// word in the query); the case carries the cleaned needle.
+    private enum AppIntent {
+        case notion(needle: String)
+        case linear(needle: String)
+        case spotify(needle: String)
+        case none
+    }
+
+    /// Common filler words stripped from app-intent queries before the
+    /// remainder is used as the search needle.
+    private static let appIntentStopwords: Set<String> = [
+        "open", "in", "on", "the", "my", "find", "search", "for", "page",
+        "doc", "document", "to", "a", "an", "show", "me", "get",
+        "from", "into", "please", "pls", "with", "and",
+        // Spotify-flavored stopwords; safe to drop because they don't
+        // disambiguate playlist names.
+        "play", "songs", "song", "track", "tracks", "shuffle", "random",
+        "music"
+    ]
+
+    /// Decides whether the query is "open X in <app>" intent and which
+    /// app it targets. Specific app names take priority over generic
+    /// verbs ("play") so "open notion page about play time" stays a
+    /// Notion intent rather than getting hijacked by the Spotify trigger.
+    private static func detectAppIntent(query: String) -> AppIntent {
+        let tokens = query.lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+
+        func cleaned(_ stripping: Set<String>) -> String {
+            let drop = stripping.union(appIntentStopwords)
+            return tokens.filter { !drop.contains($0) }
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespaces)
+        }
+
+        // Specific app names first.
+        if tokens.contains("notion")  { return .notion(needle: cleaned(["notion"])) }
+        if tokens.contains("linear")  { return .linear(needle: cleaned(["linear"])) }
+        if tokens.contains("spotify") {
+            let needle = cleaned(["spotify"])
+            // "spotify" alone (no needle) → just open Spotify, no junk.
+            return .spotify(needle: needle)
+        }
+
+        // Generic "play X" → Spotify intent ONLY when no specific app
+        // matched AND there's a target word after "play". Catches "play
+        // random songs from cherry heart" but skips bare "play" which
+        // would otherwise match every playlist alphabetically.
+        if tokens.contains("play") {
+            let needle = cleaned(["play"])
+            guard needle.count >= 2 else { return .none }
+            return .spotify(needle: needle)
+        }
+
+        return .none
+    }
+
+    /// Identifies which third-party app the user is routing to.
+    /// Used as a small enum to keep `runAppOnly` source-agnostic.
+    private enum AppTarget {
+        case notion, linear, spotify
+    }
+
+    /// Single-source search path used by app-intent shortcuts. Clears
+    /// every other result list so the user sees a focused, one-row-ish
+    /// view they can hit Enter on. Sets an explanation banner so the
+    /// intent recognition is visible in the UI.
+    private func runAppOnly(_ app: AppTarget, needle: String, searchID: Int) async {
+        let results: [SearchResult]
+        let label: String
+        switch app {
+        case .notion:
+            results = await notionService.search(query: needle)
+            label = "Notion"
+        case .linear:
+            results = await linearService.search(query: needle)
+            label = "Linear"
+        case .spotify:
+            results = await spotifyService.search(query: needle)
+            label = "Spotify"
+        }
+        guard searchID == currentSearchID else { return }
+        self.notionResults  = (app == .notion)  ? results : []
+        self.linearResults  = (app == .linear)  ? results : []
+        self.spotifyResults = (app == .spotify) ? results : []
+        self.browserResults = []
+        self.fileResults = []
+        self.appResults = []
+        self.whatsappResults = []
+        self.discordResults = []
+        self.imessageResults = []
+        self.mailResults = []
+        self.notesResults = []
+        self.clipboardResults = []
+        self.activeTab = .all
+        self.aiExplanation = needle.isEmpty
+            ? "Opening \(label)"
+            : "Looking in \(label) for \"\(needle)\""
+        self.syncDisplayedResults(resetSelection: true)
+        self.isLoading = false
+        self.isAIThinking = false
     }
 
     /// Direct keyword search across all services. Existing behavior.
@@ -195,9 +352,10 @@ final class SearchViewModel: ObservableObject {
         async let imsg      = imessageService.search(query: query)
         async let mail      = mailService.search(query: query)
         async let notes     = notesService.search(query: query)
+        async let notion    = notionService.search(query: query)
         async let clipboard = clipboardService.search(query: query)
-        let (b, f, a, w, d, im, ml, nt, cb) = await (
-            browser, files, apps, whatsapp, discord, imsg, mail, notes, clipboard
+        let (b, f, a, w, d, im, ml, nt, nn, cb) = await (
+            browser, files, apps, whatsapp, discord, imsg, mail, notes, notion, clipboard
         )
 
         guard searchID == currentSearchID else { return }
@@ -209,6 +367,7 @@ final class SearchViewModel: ObservableObject {
         self.imessageResults = im
         self.mailResults = ml
         self.notesResults = nt
+        self.notionResults = nn
         self.clipboardResults = cb
         self.syncDisplayedResults(resetSelection: true)
         self.isLoading = false
@@ -221,15 +380,25 @@ final class SearchViewModel: ObservableObject {
         isAIThinking = true
         aiExplanation = nil
 
+        // Clear the "Thinking…" spinner on EVERY exit path (success,
+        // throw, guard-bailout, or cancellation). Only the latest in-
+        // flight search owns the flag — stale tasks bail without
+        // touching it so they don't toggle UI for a query the user
+        // already moved past.
+        defer {
+            if searchID == currentSearchID {
+                isAIThinking = false
+            }
+        }
+
         let plan: QueryPlan
         do {
             plan = try await smartService.plan(query: query)
         } catch {
             await runKeywordSearch(query: query, searchID: searchID)
-            isAIThinking = false
             return
         }
-
+        if Task.isCancelled { return }
         guard searchID == currentSearchID else { return }
         aiExplanation = plan.explanation
 
@@ -239,11 +408,11 @@ final class SearchViewModel: ObservableObject {
         // rows), we want messages WITH drish containing 'address'.
         await routeSmartSearch(plan: plan, searchID: searchID)
 
+        if Task.isCancelled { return }
         guard searchID == currentSearchID else { return }
         if let mappedTab = Self.mapPlannedSource(plan.source) {
             activeTab = mappedTab
         }
-        isAIThinking = false
     }
 
     /// Per-source routing of a planner result.
@@ -297,6 +466,9 @@ final class SearchViewModel: ObservableObject {
             self.fileResults = []
             self.mailResults = []
             self.notesResults = []
+            self.notionResults = []
+            self.linearResults = []
+            self.spotifyResults = []
             self.clipboardResults = []
             self.syncDisplayedResults(resetSelection: true)
             self.isLoading = false
@@ -326,6 +498,9 @@ final class SearchViewModel: ObservableObject {
             self.fileResults = []
             self.mailResults = []
             self.notesResults = []
+            self.notionResults = []
+            self.linearResults = []
+            self.spotifyResults = []
             self.clipboardResults = []
             self.syncDisplayedResults(resetSelection: true)
             self.isLoading = false
@@ -456,7 +631,8 @@ final class SearchViewModel: ObservableObject {
         merged.reserveCapacity(
             appResults.count + browserResults.count + fileResults.count
             + whatsappResults.count + discordResults.count + imessageResults.count
-            + mailResults.count + notesResults.count + clipboardResults.count
+            + mailResults.count + notesResults.count + notionResults.count
+            + linearResults.count + spotifyResults.count + clipboardResults.count
         )
         merged.append(contentsOf: appResults)
         merged.append(contentsOf: browserResults)
@@ -466,6 +642,9 @@ final class SearchViewModel: ObservableObject {
         merged.append(contentsOf: imessageResults)
         merged.append(contentsOf: mailResults)
         merged.append(contentsOf: notesResults)
+        merged.append(contentsOf: notionResults)
+        merged.append(contentsOf: linearResults)
+        merged.append(contentsOf: spotifyResults)
         merged.append(contentsOf: clipboardResults)
         return merged.sorted(by: rankSort)
     }
@@ -577,10 +756,75 @@ final class SearchViewModel: ObservableObject {
                 pb.setString(title, forType: .string)
             }
             return NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Notes.app"))
+
+        case .spotifyPlay(let uri, let shuffle):
+            // AppleScript blocks until Spotify responds (~100ms); run off
+            // the main thread so the launcher's dismiss animation isn't
+            // janky. We treat any failure as "still consider it opened"
+            // — Spotify will be foregrounded by the activate command even
+            // if the play track step fails (e.g. invalid URI).
+            Task.detached {
+                try? SpotifyPlayer.play(uri: uri, shuffle: shuffle)
+            }
+            return true
         }
     }
 
     // MARK: - Compose flow
+
+    /// Enter acting mode using arbitrary text captured from the user's
+    /// current selection (e.g. text highlighted in Chrome or any other
+    /// app when they hit ⌘K). We map the originating app to a Source
+    /// when we recognize it so the acting card shows "FROM WHATSAPP" /
+    /// "FROM MESSAGES" / "FROM SAFARI" etc with the right icon — falls
+    /// back to generic .file for unknown apps.
+    func beginActingWithSelection(text: String, sourceAppName: String? = nil) {
+        let snippet = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !snippet.isEmpty else { return }
+        let synthetic = SearchResult(
+            title: "Selected text",
+            subtitle: snippet,
+            source: Self.sourceForAppName(sourceAppName),
+            date: nil,
+            badge: nil,
+            openTarget: .copyToClipboard(snippet),
+            rank: 0
+        )
+        // Stash the original app name so the acting card can show it
+        // verbatim instead of the Source enum's stylized name (e.g.
+        // "Cursor" instead of "File" when we don't recognize the app).
+        actingSourceDisplayName = sourceAppName
+        beginActing(on: synthetic)
+    }
+
+    /// Display name to override `source.rawValue` in the acting context
+    /// card. Set by selection-capture; nil for normal search-result acting.
+    @Published private(set) var actingSourceDisplayName: String?
+
+    /// Map a frontmost-app name to one of our known Source enum cases so
+    /// the acting card gets the appropriate icon + tint. Unknown apps
+    /// fall back to .file; the actual app name still surfaces via
+    /// `actingSourceDisplayName`.
+    private static func sourceForAppName(_ name: String?) -> SearchResult.Source {
+        guard let lower = name?.lowercased() else { return .file }
+        switch lower {
+        case "whatsapp":              return .whatsapp
+        case "messages":              return .imessage
+        case "discord":               return .discord
+        case "mail":                  return .mail
+        case "notes":                 return .notes
+        case "notion":                return .notion
+        case "linear":                return .linear
+        case "spotify":               return .spotify
+        case "safari":                return .chrome  // closest available
+        case "google chrome", "chrome": return .chrome
+        case "arc":                   return .arc
+        case "brave browser":         return .brave
+        case "microsoft edge":        return .edge
+        case "terminal", "iterm", "iterm2": return .terminal
+        default:                      return .file
+        }
+    }
 
     /// Enter acting mode for a result. The search bar's next Enter becomes
     /// an action intent (not a search). UI shows a context card with the

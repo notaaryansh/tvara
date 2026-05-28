@@ -38,6 +38,8 @@
     <string>spotlight++ creates calendar events from the compose panel.</string>
     <key>NSCalendarsUsageDescription</key>
     <string>spotlight++ creates calendar events from the compose panel.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>spotlight++ looks up phone numbers and emails so it can show iMessage chat shortcuts for people in your address book.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key>

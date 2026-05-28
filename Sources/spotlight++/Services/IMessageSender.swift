@@ -8,6 +8,24 @@ import Foundation
 /// "+15551234567" or email like "person@icloud.com". We don't do contact
 /// resolution here — callers pass the resolved handle.
 enum IMessageSender {
+    /// Pre-prompt for Automation permission to control Messages.app so the
+    /// TCC dialog fires at app launch rather than on the first send.
+    /// AEDeterminePermissionToAutomateTarget is the low-level API that
+    /// shows the prompt WITHOUT actually launching the target app — much
+    /// better UX than firing a no-op AppleScript which would bring
+    /// Messages.app to the foreground on every launch.
+    static func warmAccess() {
+        let bundleId = "com.apple.iChat"   // Messages.app's classic bundle id
+        let target = NSAppleEventDescriptor(bundleIdentifier: bundleId)
+        guard let aeDescPtr = target.aeDesc else { return }
+        _ = AEDeterminePermissionToAutomateTarget(
+            aeDescPtr,
+            typeWildCard,
+            typeWildCard,
+            true   // askUserIfNeeded
+        )
+    }
+
     enum SendError: Error, CustomStringConvertible {
         case compileFailed
         case scriptError(String)

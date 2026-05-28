@@ -57,9 +57,25 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
 
     private func show() {
         guard let window else { return }
+
+        // BEFORE we steal focus, try to grab whatever text the user has
+        // selected in the frontmost app. If they have a selection, we
+        // open straight into "acting mode" with that text as the context
+        // — so they can say things like "send a summary of this to mikki"
+        // about anything they're reading. If there's no selection, this
+        // is a no-op (returns nil silently) and we open as normal search.
+        let captured = TextSelectionCapture.grab()
+
         repositionForCurrentScreen()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+
+        if let captured {
+            viewModel.beginActingWithSelection(
+                text: captured.text,
+                sourceAppName: captured.sourceAppName
+            )
+        }
     }
 
     private func hide() {

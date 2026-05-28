@@ -9,10 +9,12 @@ actor AppleMessagesService {
     private var indexDb: OpaquePointer?
     private var lastBuildCheck: Date?
     private var buildTask: Task<Void, Never>?
+    private let contactsResolver: ContactsResolver
     private static let refreshLifetime: TimeInterval = 60
 
-    init() {
+    init(contactsResolver: ContactsResolver = ContactsResolver()) {
         self.chatDbPath = NSHomeDirectory() + "/Library/Messages/chat.db"
+        self.contactsResolver = contactsResolver
 
         let supportDir = NSHomeDirectory()
             + "/Library/Application Support/spotlight++"
@@ -33,41 +35,114 @@ actor AppleMessagesService {
     }
 
     func warmCache() async {
-        await refreshIfNeeded()
+        // Warm both the chat.db decoded-text cache AND the Contacts.app
+        // resolver — that way every TCC prompt iMessage search depends on
+        // (Full Disk Access + Contacts) fires at app launch instead of
+        // staggered across the first few searches.
+        async let chatWarm: Void = refreshIfNeeded()
+        async let contactsWarm: Void = contactsResolver.warmCache()
+        _ = await (chatWarm, contactsWarm)
     }
 
     func search(query: String, limit: Int = 30) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
-        guard FileManager.default.fileExists(atPath: chatDbPath) else { return [] }
 
         await refreshIfNeeded()
 
-        // chat.db has -wal/-shm siblings; copy all three.
-        let tmpDb  = NSTemporaryDirectory() + "spotlight_imsg_\(UUID().uuidString).db"
-        let tmpWal = tmpDb + "-wal"
-        let tmpShm = tmpDb + "-shm"
+        // chat.db copy (FDA-gated). On TCC denial we still want the
+        // Contacts.app-derived cards to appear, so the rest of this
+        // function treats chat.db data as optional.
+        var chatDbContacts: [SearchResult] = []
+        var messages: [SearchResult] = []
+        if FileManager.default.fileExists(atPath: chatDbPath),
+           let tmpDb = copyChatDb() {
+            defer { Self.cleanupTempDb(tmpDb) }
+            chatDbContacts = queryContactCards(chatDbPath: tmpDb, query: trimmed)
+            messages = querySQL(chatDbPath: tmpDb, query: trimmed, limit: limit)
+        }
 
+        // Contacts.app cards run unconditionally — they need only the
+        // Contacts permission, not Full Disk Access.
+        let abContacts = await contactCardsFromAddressBook(
+            query: trimmed,
+            excluding: chatDbContacts
+        )
+
+        return chatDbContacts + abContacts + messages
+    }
+
+    /// Copy chat.db + WAL/SHM into a temp file for read-only querying.
+    /// Returns nil if the primary copy fails (typically TCC denial).
+    private func copyChatDb() -> String? {
+        let tmpDb  = NSTemporaryDirectory() + "spotlight_imsg_\(UUID().uuidString).db"
         do {
             try FileManager.default.copyItem(atPath: chatDbPath, toPath: tmpDb)
         } catch {
-            return []   // TCC denied
+            return nil
         }
-        if FileManager.default.fileExists(atPath: chatDbPath + "-wal") {
-            try? FileManager.default.copyItem(atPath: chatDbPath + "-wal", toPath: tmpWal)
+        for suffix in ["-wal", "-shm"] {
+            let src = chatDbPath + suffix
+            if FileManager.default.fileExists(atPath: src) {
+                try? FileManager.default.copyItem(atPath: src, toPath: tmpDb + suffix)
+            }
         }
-        if FileManager.default.fileExists(atPath: chatDbPath + "-shm") {
-            try? FileManager.default.copyItem(atPath: chatDbPath + "-shm", toPath: tmpShm)
-        }
-        defer {
-            try? FileManager.default.removeItem(atPath: tmpDb)
-            try? FileManager.default.removeItem(atPath: tmpWal)
-            try? FileManager.default.removeItem(atPath: tmpShm)
-        }
+        return tmpDb
+    }
 
-        let contacts = queryContactCards(chatDbPath: tmpDb, query: trimmed)
-        let messages = querySQL(chatDbPath: tmpDb, query: trimmed, limit: limit)
-        return contacts + messages
+    nonisolated private static func cleanupTempDb(_ path: String) {
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: path + suffix)
+        }
+    }
+
+    /// Address-book backed lookup: ask Contacts.app for anyone whose name
+    /// matches the needle, then emit one card per contact using their
+    /// first phone/email as the iMessage handle. Skips contacts whose
+    /// handle is already represented in chatDb-derived cards (dedupes by
+    /// normalized phone digits / lowercased email).
+    private func contactCardsFromAddressBook(
+        query: String, excluding existing: [SearchResult]
+    ) async -> [SearchResult] {
+        let seen: Set<String> = Set(existing.compactMap { r -> String? in
+            if case .imessageChat(let h, _) = r.openTarget {
+                return Self.normalizeHandle(h)
+            }
+            return nil
+        })
+
+        let matches = await contactsResolver.search(name: query)
+        var out: [SearchResult] = []
+        for c in matches {
+            // Prefer phone over email — iMessage routes phones via SMS too,
+            // and most people initiate iMessage chats with phone numbers.
+            let handle = c.phoneNumbers.first ?? c.emails.first
+            guard let handle, !handle.isEmpty else { continue }
+            let norm = Self.normalizeHandle(handle)
+            if seen.contains(norm) { continue }
+
+            let title = c.displayName.isEmpty ? handle : c.displayName
+            out.append(SearchResult(
+                title: title,
+                subtitle: "Open iMessage chat",
+                source: .imessage,
+                date: nil,
+                badge: nil,
+                openTarget: .imessageChat(handle: handle, messageText: ""),
+                rank: 990,                     // just below chat.db cards (1000)
+                iconData: c.imageData
+            ))
+        }
+        return out
+    }
+
+    /// Normalize a handle for dedup: phones → digits only, emails → lowercase.
+    /// Used so "+1 (415) 555-1234" and "4155551234" hash to the same key.
+    nonisolated private static func normalizeHandle(_ h: String) -> String {
+        if h.contains("@") {
+            return h.lowercased()
+        }
+        return h.filter { $0.isNumber }
     }
 
     /// Top-ranked "Open iMessage chat" cards for any chat whose display

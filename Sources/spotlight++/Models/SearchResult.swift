@@ -15,6 +15,9 @@ struct SearchResult: Identifiable, Hashable {
     /// partner (e.g. Discord server channels), this is the display name
     /// of the person who actually authored the message.
     let senderName: String?
+    /// HTTPS URL of cover art for sources like Spotify where we have the
+    /// CDN URL but no local image bytes. Row view does an async download.
+    let remoteArtURL: String?
 
     init(
         title: String,
@@ -25,7 +28,8 @@ struct SearchResult: Identifiable, Hashable {
         openTarget: OpenTarget,
         rank: Int,
         iconData: Data? = nil,
-        senderName: String? = nil
+        senderName: String? = nil,
+        remoteArtURL: String? = nil
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -36,6 +40,7 @@ struct SearchResult: Identifiable, Hashable {
         self.rank = rank
         self.iconData = iconData
         self.senderName = senderName
+        self.remoteArtURL = remoteArtURL
     }
 
     var displayTitle: String {
@@ -51,7 +56,8 @@ struct SearchResult: Identifiable, Hashable {
         SearchResult(
             title: title, subtitle: subtitle, source: source, date: date,
             badge: badge, openTarget: openTarget, rank: newRank,
-            iconData: iconData, senderName: senderName
+            iconData: iconData, senderName: senderName,
+            remoteArtURL: remoteArtURL
         )
     }
 
@@ -81,6 +87,9 @@ struct SearchResult: Identifiable, Hashable {
         /// the user can ⌘F + ⌘V to find it. Apple doesn't expose a stable
         /// per-note deep link from outside the app.
         case notesNote(title: String)
+        /// Drive Spotify.app via AppleScript: set shuffle on, then play the
+        /// given URI (typically `spotify:playlist:...`).
+        case spotifyPlay(uri: String, shuffle: Bool)
     }
 
     enum Source: String, CaseIterable {
@@ -98,6 +107,9 @@ struct SearchResult: Identifiable, Hashable {
         case terminal  = "Terminal"
         case clipboard = "Clipboard"
         case notes     = "Notes"
+        case notion    = "Notion"
+        case linear    = "Linear"
+        case spotify   = "Spotify"
 
         var icon: String {
             switch self {
@@ -115,6 +127,9 @@ struct SearchResult: Identifiable, Hashable {
             case .terminal:  return "terminal.fill"
             case .clipboard: return "doc.on.clipboard.fill"
             case .notes:     return "note.text"
+            case .notion:    return "doc.richtext"
+            case .linear:    return "checklist"
+            case .spotify:   return "music.note"
             }
         }
 
@@ -134,6 +149,9 @@ struct SearchResult: Identifiable, Hashable {
             case .terminal:  return Color(red: 0.20, green: 0.20, blue: 0.22)
             case .clipboard: return Color(red: 0.55, green: 0.55, blue: 0.60)
             case .notes:     return Color(red: 0.98, green: 0.78, blue: 0.27)   // Notes yellow
+            case .notion:    return Color(red: 0.18, green: 0.18, blue: 0.20)   // Notion dark
+            case .linear:    return Color(red: 0.36, green: 0.42, blue: 0.97)   // Linear indigo
+            case .spotify:   return Color(red: 0.12, green: 0.84, blue: 0.38)   // Spotify green
             }
         }
     }

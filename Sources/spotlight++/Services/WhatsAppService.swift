@@ -93,6 +93,10 @@ actor WhatsAppService {
         }
         defer { sqlite3_close(db) }
 
+        // ZSESSIONTYPE: 0 = 1:1 DM, 1 = group chat, 3 = status broadcast feed.
+        // The status feed JIDs end with `.status` and show as a separate
+        // ZWACHATSESSION row per contact — they're a feed of someone's
+        // Status posts, not a chat the user can open, so exclude them.
         let sql = """
             SELECT ZPARTNERNAME, ZCONTACTJID, ZSESSIONTYPE, ZLASTMESSAGEDATE
             FROM ZWACHATSESSION
@@ -100,6 +104,8 @@ actor WhatsAppService {
               AND ZPARTNERNAME IS NOT NULL
               AND ZPARTNERNAME != ''
               AND ZREMOVED = 0
+              AND ZSESSIONTYPE IN (0, 1)
+              AND ZCONTACTJID NOT LIKE '%.status'
             ORDER BY ZLASTMESSAGEDATE DESC
             LIMIT 8
         """

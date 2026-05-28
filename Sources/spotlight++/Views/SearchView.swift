@@ -104,7 +104,11 @@ struct SearchView: View {
     private var actingContextCard: some View {
         let result = viewModel.actingOn
         let snippet = (result?.subtitle.isEmpty == false ? result!.subtitle : (result?.title ?? ""))
-        let sourceName = result?.source.rawValue ?? ""
+        // For selection-capture, prefer the original frontmost-app name
+        // (e.g. "Cursor", "Slack" — apps we don't have a Source case for)
+        // over the stylized Source.rawValue. Falls back to Source for
+        // regular result-acting.
+        let sourceName = viewModel.actingSourceDisplayName ?? (result?.source.rawValue ?? "")
         let accent = result?.source.tint ?? Color.purple
 
         return HStack(alignment: .center, spacing: 12) {

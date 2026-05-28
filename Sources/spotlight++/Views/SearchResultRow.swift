@@ -64,6 +64,8 @@ struct SearchResultRow: View {
             tintedBadge
         case .notesNote:
             tintedBadge   // Notes source already has its yellow tint + note.text icon
+        case .spotifyPlay:
+            spotifyArtBadge   // remote-loaded album / playlist cover when present
         case .url:
             if isDiscord {
                 messageAvatar(platformBadge: Self.discordBadgeIcon)
@@ -156,6 +158,45 @@ struct SearchResultRow: View {
         guard let first = trimmed.first else { return "?" }
         return String(first).uppercased()
     }
+
+    /// Spotify rows: square album/playlist art (AsyncImage if we have a
+    /// URL, otherwise green tinted music-note placeholder) PLUS a small
+    /// Spotify-app-icon overlay in the bottom-right — same pattern as
+    /// the WhatsApp/Discord platform badges on message rows.
+    @ViewBuilder
+    private var spotifyArtBadge: some View {
+        ZStack(alignment: .bottomTrailing) {
+            // Base: art or fallback
+            Group {
+                if let s = result.remoteArtURL, let url = URL(string: s) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .interpolation(.high)
+                                .frame(width: 36, height: 36)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        default:
+                            tintedBadge
+                        }
+                    }
+                } else {
+                    tintedBadge
+                }
+            }
+            // Platform badge: Spotify app icon, bottom-right
+            Image(nsImage: Self.spotifyBadgeIcon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 18, height: 18)
+                .offset(x: 4, y: 4)
+        }
+        .frame(width: 36, height: 36)
+    }
+
+    private static let spotifyBadgeIcon: NSImage =
+        NSWorkspace.shared.icon(forFile: "/Applications/Spotify.app")
 
     private var tintedBadge: some View {
         ZStack {

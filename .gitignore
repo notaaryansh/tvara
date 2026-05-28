@@ -24,6 +24,13 @@ spotlight++.app/
 # Unrelated working files in this directory
 writing-submissions.md
 
+# Python cache
+__pycache__/
+*.pyc
+
+# Rendered video outputs (large binaries)
+Resources/*.mp4
+
 # Secrets — never commit
 .env
 *.env

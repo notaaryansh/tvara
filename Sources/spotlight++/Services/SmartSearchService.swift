@@ -125,7 +125,13 @@ actor SmartSearchService {
     /// Plan a compose action from a free-form intent + the content the user
     /// was acting on. The planner decides whether to return a message-send
     /// or a calendar-event action. Caller switches on ComposeKind.
-    func planAction(intent: String, sourceContent: String) async throws -> ComposeKind {
+    ///
+    /// `sourceApp`, when non-nil, tells the planner which app the user
+    /// captured the text from (e.g. "Messages", "WhatsApp", "Cursor").
+    /// Critical for attribution: a paragraph captured from Messages is
+    /// almost certainly a quote from someone else, so summaries should
+    /// say "Aum said X" rather than "I X".
+    func planAction(intent: String, sourceContent: String, sourceApp: String? = nil) async throws -> ComposeKind {
         guard let key = loadKey() else { throw SmartSearchError.noAPIKey }
 
         var request = URLRequest(url: Self.endpoint)
@@ -395,6 +401,12 @@ actor SmartSearchService {
 
     Rules:
     - "search_term": the CONCEPTUAL CORE of what the user is looking for, expanded with 2-5 synonyms or related terms. This is what gets embedded for semantic similarity, so include words that the matching messages would actually contain — NOT the contact's name, NOT filler. e.g. for "addresses i sent drishti" → "street address physical location". For "what is drishti mad about" → "angry upset confrontation hurt feelings".
+    - SPECIAL CASE — LITERAL-TOKEN ENTITIES: when the user is asking about URLs / links, emails, phone numbers, or other entities recognized by a literal token prefix, the "search_term" MUST be that literal prefix (not synonyms). The embedding model aligns far more strongly with the exact token used in real data than with abstract synonyms. Map:
+        • URLs / links / websites / articles → search_term: "https"
+        • email addresses / emails sent      → search_term: "@gmail.com"
+        • phone numbers                      → search_term: "+1 555"
+        • hex color codes                    → search_term: "#ff"
+      Verified empirically: "https" alone gives clean separation between real URL strings and conversational text; expanded variants like "URL link shared" miss URLs that score 0.20-0.25 and accept noise that scores higher.
     - "keywords": 1-5 short search terms extracted from the query — used as a fallback keyword filter. STRIP filler words. Keep nouns, proper names, meaningful verbs.
     - "contact": when the query mentions a person by name, put that name here (without titles). Otherwise null. The contact is a FILTER, not a search term.
     - "time_range": only when the query explicitly mentions a time window; default to "any".
@@ -403,7 +415,13 @@ actor SmartSearchService {
     Examples:
 
     Q: "i sent an airbnb link to drishtu can you find it"
-    A: {"source": "messages", "search_term": "airbnb link rental booking URL", "keywords": ["airbnb"], "contact": "drishtu", "time_range": "any", "explanation": "Searching messages with drishtu for an airbnb link"}
+    A: {"source": "messages", "search_term": "https", "keywords": ["airbnb", "link"], "contact": "drishtu", "time_range": "any", "explanation": "Searching messages with drishtu for an airbnb link"}
+
+    Q: "what links have i sent to drish"
+    A: {"source": "messages", "search_term": "https", "keywords": ["link"], "contact": "drish", "time_range": "any", "explanation": "Searching messages with drish for links you sent"}
+
+    Q: "phone number mom gave me"
+    A: {"source": "messages", "search_term": "+1 555", "keywords": ["phone", "number"], "contact": "mom", "time_range": "any", "explanation": "Searching messages with mom for a phone number"}
 
     Q: "addresses i sent drishti"
     A: {"source": "messages", "search_term": "street address physical location apartment", "keywords": ["address"], "contact": "drishti", "time_range": "any", "explanation": "Searching messages with drishti for street addresses"}

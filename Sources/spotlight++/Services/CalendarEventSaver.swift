@@ -22,6 +22,18 @@ enum CalendarEventSaver {
         }
     }
 
+    /// Pre-prompt for Calendar access at app launch so the TCC dialog
+    /// fires alongside the other permission prompts, not when the user
+    /// first clicks Create Event.
+    static func warmAccess() async {
+        let store = EKEventStore()
+        _ = await withCheckedContinuation { cont in
+            store.requestFullAccessToEvents { granted, _ in
+                cont.resume(returning: granted)
+            }
+        }
+    }
+
     static func save(_ action: EventAction) async throws {
         let store = EKEventStore()
         try await requestAccess(store: store)
