@@ -200,6 +200,78 @@ final class WindowManagerService {
         return tokens.joined(separator: " ")
     }
 
+    // MARK: - Preview
+
+    /// Returns the snap target as (destination screen, rect in NSScreen
+    /// coords) so the overlay panel can be placed without an AX flip.
+    /// Re-reads the focused window's frame on every call because the
+    /// preview should track the actual current window's screen and size
+    /// (for center / next-display, the rect depends on the live size).
+    func previewRect(for action: WindowAction) -> (NSScreen, CGRect)? {
+        guard let pid = targetPID, pid != getpid() else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        var winRef: CFTypeRef?
+        let copyStatus = AXUIElementCopyAttributeValue(
+            app, kAXFocusedWindowAttribute as CFString, &winRef
+        )
+        guard copyStatus == .success, let win = winRef else { return nil }
+        let window = win as! AXUIElement
+        let currentRect = Self.readFrame(window) ?? .zero
+        let currentScreen = Self.screenContaining(currentRect)
+
+        switch action {
+        case .nextDisplay, .previousDisplay:
+            let screens = NSScreen.screens
+            guard screens.count > 1 else { return nil }
+            let ordered = screens.sorted {
+                $0.visibleFrame.minX != $1.visibleFrame.minX
+                    ? $0.visibleFrame.minX < $1.visibleFrame.minX
+                    : $0.visibleFrame.minY < $1.visibleFrame.minY
+            }
+            guard let idx = ordered.firstIndex(of: currentScreen) else { return nil }
+            let forward = (action == .nextDisplay)
+            let nextIdx = forward
+                ? (idx + 1) % ordered.count
+                : (idx - 1 + ordered.count) % ordered.count
+            let dest = ordered[nextIdx]
+            let v = dest.visibleFrame
+            let size = currentRect.size
+            let nsRect = CGRect(
+                x: v.minX + (v.width - size.width) / 2,
+                y: v.minY + (v.height - size.height) / 2,
+                width: size.width, height: size.height
+            )
+            return (dest, nsRect)
+
+        case .center:
+            let v = currentScreen.visibleFrame
+            let size = currentRect.size
+            let nsRect = CGRect(
+                x: v.minX + (v.width - size.width) / 2,
+                y: v.minY + (v.height - size.height) / 2,
+                width: size.width, height: size.height
+            )
+            return (currentScreen, nsRect)
+
+        default:
+            let axRect = Self.rect(for: action, on: currentScreen)
+            return (currentScreen, Self.axToNS(axRect))
+        }
+    }
+
+    /// AX → NSScreen coord conversion. Both systems use the primary
+    /// display as their origin; AX is top-left, NSScreen is bottom-left.
+    /// Widths and heights are identical; only y flips.
+    private static func axToNS(_ axRect: CGRect) -> CGRect {
+        let primary = NSScreen.screens.first?.frame.height ?? axRect.maxY
+        return CGRect(
+            x: axRect.minX,
+            y: primary - axRect.maxY,
+            width: axRect.width,
+            height: axRect.height
+        )
+    }
+
     // MARK: - Execution
 
     /// Run the action against the captured target PID's focused window.

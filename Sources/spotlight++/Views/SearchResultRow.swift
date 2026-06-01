@@ -48,7 +48,6 @@ struct SearchResultRow: View {
                 .padding(.horizontal, 6)
         )
         .contentShape(Rectangle())
-        .animation(.easeOut(duration: 0.14), value: isSelected)
     }
 
     @ViewBuilder
@@ -245,32 +244,18 @@ struct SearchResultRow: View {
 
     @ViewBuilder
     private var trailingMeta: some View {
-        // Window rows: when this row is selected, show a bigger schematic
-        // of the snap target. The smaller version is already in the icon
-        // slot, so this is the "you've focused this one, here's what
-        // pressing ⏎ will do" beat.
-        if isSelected,
-           case .windowAction(let action) = result.openTarget {
-            WindowActionPreview(
-                action: action,
-                screenSize: CGSize(width: 96, height: 60)
-            )
-            .padding(.trailing, 4)
-            .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .trailing)))
-        } else {
-            VStack(alignment: .trailing, spacing: 2) {
-                if let date = result.date {
-                    Text(relativeString(date))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                }
-                // Discord uses `badge` for the "#channel" label which we show
-                // inline next to the title — suppress it here to avoid duplication.
-                if !isDiscord, let badge = result.badge {
-                    Text(badge)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
+        VStack(alignment: .trailing, spacing: 2) {
+            if let date = result.date {
+                Text(relativeString(date))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            // Discord uses `badge` for the "#channel" label which we show
+            // inline next to the title — suppress it here to avoid duplication.
+            if !isDiscord, let badge = result.badge {
+                Text(badge)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
             }
         }
     }

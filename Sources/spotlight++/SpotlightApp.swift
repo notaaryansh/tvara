@@ -6,6 +6,7 @@ import Carbon.HIToolbox
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: SearchWindowController!
     private var viewModel: SearchViewModel!
+    private var overlayController: WindowSnapOverlayController!
     private var statusItem: NSStatusItem!
 
     static func main() {
@@ -24,8 +25,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // this way because macOS won't auto-prompt for it.
         PermissionsBootstrap.requestAll()
 
-        viewModel = SearchViewModel()
+        // Build the window service ONCE and share between the view model
+        // (it owns the captured PID + match/execute) and the overlay
+        // controller (it reads previewRect from the same captured PID).
+        // If we let them default-init separately each would have its own
+        // empty `targetPID` and the overlay would never show.
+        let windowService = WindowManagerService()
+        viewModel = SearchViewModel(windowService: windowService)
         windowController = SearchWindowController(viewModel: viewModel)
+        overlayController = WindowSnapOverlayController(
+            viewModel: viewModel, windowService: windowService
+        )
 
         HotKeyManager.shared.register(
             keyCode: UInt32(kVK_ANSI_K),
