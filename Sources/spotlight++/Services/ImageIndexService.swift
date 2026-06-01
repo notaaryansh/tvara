@@ -74,6 +74,10 @@ actor ImageIndexService {
     // MARK: - Schema
 
     private static func createSchema(db: OpaquePointer?) {
+        // Original `images` table holds path + image-CLIP embedding + cached
+        // Vision JSON. The newer `labels` + `image_labels` pair adds
+        // synonym-aware label matching via CLIP text embeddings.
+        // The FTS5 mirror gives us BM25 over OCR text.
         let sql = """
         CREATE TABLE IF NOT EXISTS images (
           id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,6 +91,54 @@ actor ImageIndexService {
           indexed_at    INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_images_path ON images(path);
+
+        -- Global Vision-label vocabulary, ≤~1000 unique strings ever. Each
+        -- name is CLIP-text-encoded once and cached, so query-time we can
+        -- score images by max-cosine over their tagged labels — handling
+        -- "glasses" ↔ "eyeglasses" semantically rather than via porter stems.
+        CREATE TABLE IF NOT EXISTS labels (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          name       TEXT NOT NULL UNIQUE,
+          embedding  BLOB                  -- 512 float32, L2-normalised. NULL = not yet embedded
+        );
+
+        CREATE TABLE IF NOT EXISTS image_labels (
+          image_id   INTEGER NOT NULL,
+          label_id   INTEGER NOT NULL,
+          confidence REAL NOT NULL,
+          PRIMARY KEY (image_id, label_id),
+          FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE,
+          FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_image_labels_image ON image_labels(image_id);
+        CREATE INDEX IF NOT EXISTS idx_image_labels_label ON image_labels(label_id);
+
+        -- FTS5 contentless mirror of `images.ocr`. Manual sync via triggers
+        -- (FTS5 'content=' option) keeps the index lean — only the
+        -- inverted index, no duplicated OCR text.
+        CREATE VIRTUAL TABLE IF NOT EXISTS images_fts USING fts5(
+          ocr,
+          content='images',
+          content_rowid='id',
+          tokenize='porter unicode61'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS images_ai AFTER INSERT ON images BEGIN
+          INSERT INTO images_fts(rowid, ocr) VALUES (new.id, new.ocr);
+        END;
+        CREATE TRIGGER IF NOT EXISTS images_ad AFTER DELETE ON images BEGIN
+          INSERT INTO images_fts(images_fts, rowid, ocr) VALUES('delete', old.id, old.ocr);
+        END;
+        CREATE TRIGGER IF NOT EXISTS images_au AFTER UPDATE ON images BEGIN
+          INSERT INTO images_fts(images_fts, rowid, ocr) VALUES('delete', old.id, old.ocr);
+          INSERT INTO images_fts(rowid, ocr) VALUES (new.id, new.ocr);
+        END;
+
+        -- One-time backfill / migration flags
+        CREATE TABLE IF NOT EXISTS meta (
+          key   TEXT PRIMARY KEY,
+          value TEXT
+        );
         """
         sqlite3_exec(db, sql, nil, nil, nil)
     }
@@ -98,7 +150,79 @@ actor ImageIndexService {
     /// sweep is debounced by `scanLifetime`.
     func warmCache() async {
         _ = await ensureModels()
+        await migrateIfNeeded()
         await sweepIfStale()
+    }
+
+    /// One-time backfill: when the schema was upgraded to add the
+    /// `labels` / `image_labels` / `images_fts` tables, the rows that
+    /// were already indexed predate them. We walk the existing rows,
+    /// rebuild the FTS5 inverted index from the cached `ocr` column,
+    /// and re-tag each image from its `labels_json`. Embeddings for new
+    /// label names get computed on the fly; old image-CLIP embeddings
+    /// are reused verbatim. Tracked via the `meta` table so this only
+    /// runs once per upgrade.
+    private func migrateIfNeeded() async {
+        guard let db else { return }
+        if metaValue("rrf_backfill_done") == "1" { return }
+        guard await ensureModels() else { return }
+
+        NSLog("ImageIndexService: one-time backfill of labels + FTS5 for existing rows")
+        // FTS5 rebuild
+        sqlite3_exec(db, "INSERT INTO images_fts(images_fts) VALUES('rebuild')", nil, nil, nil)
+
+        // Walk existing rows and re-tag from labels_json
+        var stmt: OpaquePointer?
+        let sql = "SELECT id, labels_json FROM images WHERE labels_json IS NOT NULL"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            var rows: [(Int64, String)] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = sqlite3_column_int64(stmt, 0)
+                let js = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                rows.append((id, js))
+            }
+            sqlite3_finalize(stmt)
+            var done = 0
+            for (id, js) in rows {
+                guard let data = js.data(using: .utf8),
+                      let hits = try? JSONDecoder().decode([LabelHit].self, from: data) else { continue }
+                writeImageLabels(imageID: id, labels: hits)
+                done += 1
+                await Task.yield()
+                if done % 1000 == 0 {
+                    NSLog("ImageIndexService: backfilled \(done)/\(rows.count)")
+                }
+            }
+        } else {
+            sqlite3_finalize(stmt)
+        }
+
+        setMetaValue("rrf_backfill_done", "1")
+        loadLabelCache()
+        NSLog("ImageIndexService: backfill complete")
+    }
+
+    private func metaValue(_ key: String) -> String? {
+        guard let db else { return nil }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = ?", -1, &stmt, nil) == SQLITE_OK else { return nil }
+        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT_IMG)
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+        }
+        return nil
+    }
+
+    private func setMetaValue(_ key: String, _ value: String) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = "INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT_IMG)
+        sqlite3_bind_text(stmt, 2, value, -1, SQLITE_TRANSIENT_IMG)
+        sqlite3_step(stmt)
     }
 
     /// Force an immediate full sweep. Useful as a "Reindex" command later.
@@ -108,80 +232,189 @@ actor ImageIndexService {
     }
 
     /// Run the natural-language query and return ranked image results.
-    /// Pure-CLIP cosine ranking for now — label/OCR boosts can be layered
-    /// in once we measure them on the user's own corpus.
+    ///
+    /// Fuses three signals via Reciprocal Rank Fusion (k=60):
+    ///   1. CLIP cosine over the image embedding   — general visual concept
+    ///   2. CLIP cosine over per-image best label  — synonym-aware tag match
+    ///   3. BM25 over OCR text via FTS5            — exact-text-in-image
+    ///
+    /// RRF sidesteps the score-normalisation problem (BM25 ∈ [0, ∞),
+    /// cosine ∈ [-1, 1]) — only the per-list rank position matters.
+    /// k=60 is the canonical constant from the Cormack/Clarke/Buettcher
+    /// paper, balanced so a top-5 hit in one signal still beats a
+    /// rank-200 hit in two others.
     func search(_ query: String, limit: Int = 30) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2 else { return [] }
         guard await ensureModels(),
               let qVec = encodeText(trimmed) else { return [] }
-
-        // Pull all (path, embedding) pairs. At our target scale (<= 100k
-        // images), an in-memory dot pass over 100k × 512 floats ≈ 200ms;
-        // ANN indexing can be added later.
         guard let db else { return [] }
-        let sql = "SELECT path, ocr, labels_json, embedding, width, height FROM images WHERE embedding IS NOT NULL"
-        var stmt: OpaquePointer?
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
 
-        var scored: [(Float, String, String, String, Int, Int)] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let path = String(cString: sqlite3_column_text(stmt, 0))
-            let ocr = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
-            let labels = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
-            guard let blob = sqlite3_column_blob(stmt, 3) else { continue }
-            let bytes = sqlite3_column_bytes(stmt, 3)
-            guard bytes == 512 * MemoryLayout<Float>.size else { continue }
-            let buf = UnsafeBufferPointer(start: blob.assumingMemoryBound(to: Float.self), count: 512)
-            let emb = Array(buf)
-            let w = Int(sqlite3_column_int(stmt, 4))
-            let h = Int(sqlite3_column_int(stmt, 5))
+        // Make sure the label vector cache is warm — the search loop reads
+        // it without going through SQLite per row.
+        if labelCache.isEmpty { loadLabelCache() }
+
+        // ─── Pull every image row's (id, path, ocr, embedding) once ────────
+        struct Row {
+            let id: Int64; let path: String; let ocr: String; let w: Int; let h: Int
+            let imgEmb: [Float]
+        }
+        var rows: [Int64: Row] = [:]
+        var stmt: OpaquePointer?
+        let sql = "SELECT id, path, ocr, embedding, width, height FROM images WHERE embedding IS NOT NULL"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = sqlite3_column_int64(stmt, 0)
+                let path = String(cString: sqlite3_column_text(stmt, 1))
+                let ocr = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+                guard let blob = sqlite3_column_blob(stmt, 3),
+                      sqlite3_column_bytes(stmt, 3) == 512 * MemoryLayout<Float>.size else { continue }
+                let buf = UnsafeBufferPointer(start: blob.assumingMemoryBound(to: Float.self), count: 512)
+                let w = Int(sqlite3_column_int(stmt, 4))
+                let h = Int(sqlite3_column_int(stmt, 5))
+                rows[id] = Row(id: id, path: path, ocr: ocr, w: w, h: h, imgEmb: Array(buf))
+            }
+        }
+        sqlite3_finalize(stmt)
+        if rows.isEmpty { return [] }
+
+        // ─── Signal 1: image-CLIP cosine ───────────────────────────────────
+        var imgScores: [(Int64, Float)] = []
+        imgScores.reserveCapacity(rows.count)
+        for (id, r) in rows {
             var s: Float = 0
-            vDSP_dotpr(qVec, 1, emb, 1, &s, vDSP_Length(512))
-            scored.append((s, path, ocr, labels, w, h))
+            vDSP_dotpr(qVec, 1, r.imgEmb, 1, &s, vDSP_Length(512))
+            imgScores.append((id, s))
+        }
+        imgScores.sort { $0.1 > $1.1 }
+
+        // ─── Signal 2: best-label cosine per image ─────────────────────────
+        // First: cosine(query, every label) once.
+        var labelScore: [Int64: Float] = [:]
+        for (labelID, lvec) in labelCache {
+            var s: Float = 0
+            vDSP_dotpr(qVec, 1, lvec, 1, &s, vDSP_Length(512))
+            labelScore[labelID] = s
+        }
+        // Then: per image, max over its tagged labels.
+        var bestLabelPerImage: [Int64: Float] = [:]
+        var llStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT image_id, label_id FROM image_labels", -1, &llStmt, nil) == SQLITE_OK {
+            while sqlite3_step(llStmt) == SQLITE_ROW {
+                let imageID = sqlite3_column_int64(llStmt, 0)
+                let labelID = sqlite3_column_int64(llStmt, 1)
+                guard let s = labelScore[labelID] else { continue }
+                if let cur = bestLabelPerImage[imageID] {
+                    if s > cur { bestLabelPerImage[imageID] = s }
+                } else {
+                    bestLabelPerImage[imageID] = s
+                }
+            }
+        }
+        sqlite3_finalize(llStmt)
+        let labelRanks = bestLabelPerImage
+            .sorted { $0.value > $1.value }
+            .map { ($0.key, $0.value) }
+
+        // ─── Signal 3: BM25 over OCR via FTS5 ──────────────────────────────
+        var bm25Ranks: [(Int64, Float)] = []
+        if let fts = buildFTSMatch(from: trimmed) {
+            var bmStmt: OpaquePointer?
+            let bmSql = "SELECT rowid, bm25(images_fts) FROM images_fts WHERE images_fts MATCH ? ORDER BY bm25(images_fts) LIMIT 200"
+            if sqlite3_prepare_v2(db, bmSql, -1, &bmStmt, nil) == SQLITE_OK {
+                sqlite3_bind_text(bmStmt, 1, fts, -1, SQLITE_TRANSIENT_IMG)
+                while sqlite3_step(bmStmt) == SQLITE_ROW {
+                    let id = sqlite3_column_int64(bmStmt, 0)
+                    let s = Float(-sqlite3_column_double(bmStmt, 1))   // FTS5 BM25 is negative; flip for "higher = better"
+                    bm25Ranks.append((id, s))
+                }
+            }
+            sqlite3_finalize(bmStmt)
         }
 
-        scored.sort { $0.0 > $1.0 }
-        // Drop the long tail — anything below 0.10 cosine is essentially
-        // noise. (Real strong matches start ~0.20+.)
-        let cut = scored.prefix(limit).filter { $0.0 > 0.10 }
+        // ─── Fuse via Reciprocal Rank Fusion ───────────────────────────────
+        let k: Double = 60
+        var rrf: [Int64: Double] = [:]
+        for (pos, p) in imgScores.enumerated()   { rrf[p.0, default: 0] += 1 / (k + Double(pos) + 1) }
+        for (pos, p) in labelRanks.enumerated()  { rrf[p.0, default: 0] += 1 / (k + Double(pos) + 1) }
+        for (pos, p) in bm25Ranks.enumerated()   { rrf[p.0, default: 0] += 1 / (k + Double(pos) + 1) }
 
-        return cut.map { (score, path, ocr, labels, w, h) in
-            let name = (path as NSString).lastPathComponent
-            let topLabels: String
-            if let data = labels.data(using: .utf8),
-               let arr = try? JSONDecoder().decode([LabelHit].self, from: data) {
-                topLabels = arr.prefix(3).map { $0.name }.joined(separator: ", ")
-            } else {
-                topLabels = ""
-            }
-            // Subtitle: short OCR snippet if any, else top labels, else dimensions.
-            let snippet = ocr.trimmingCharacters(in: .whitespacesAndNewlines)
-                            .replacingOccurrences(of: "\n", with: " ")
+        // Index the per-signal cosines so we can display them in the badge.
+        let imgCosine = Dictionary(uniqueKeysWithValues: imgScores.map { ($0.0, $0.1) })
+
+        let fused = rrf.sorted { $0.value > $1.value }.prefix(limit)
+
+        return fused.compactMap { (imageID, fusedScore) -> SearchResult? in
+            guard let r = rows[imageID] else { return nil }
+            let imgC = imgCosine[imageID] ?? 0
+            let labC = bestLabelPerImage[imageID] ?? 0
+
+            // Subtitle: OCR snippet wins if non-empty, then top labels.
+            let snippet = r.ocr.trimmingCharacters(in: .whitespacesAndNewlines)
+                              .replacingOccurrences(of: "\n", with: " ")
+            let topLabels = topLabelNames(forImage: imageID).joined(separator: ", ")
             let subtitle: String
             if !snippet.isEmpty { subtitle = String(snippet.prefix(120)) }
             else if !topLabels.isEmpty { subtitle = topLabels }
-            else { subtitle = "\(w)×\(h)" }
+            else { subtitle = "\(r.w)×\(r.h)" }
 
-            // Thumbnail bytes for the row icon (256px max).
-            let iconData = makeThumbnail(path: path, maxDim: 256)
+            // Rank encodes the fused score into a sortable Int so the
+            // cross-source merge in SearchViewModel keeps strong fused
+            // matches near the top of the unified results.
+            let rank = Int(fusedScore * 100_000)
 
-            // Rank encodes cosine into a sortable Int so the cross-source
-            // ViewModel merge keeps strong CLIP hits near the top.
-            // 0.20 cosine ≈ rank 200, 0.40 ≈ rank 400.
-            let rank = Int(score * 1000)
+            // Badge shows whichever signal won this image so the user has
+            // a quick intuition for "why did this match".
+            let badge = String(format: "%.2f", max(imgC, labC))
+
+            let iconData = makeThumbnail(path: r.path, maxDim: 256)
             return SearchResult(
-                title: name,
+                title: (r.path as NSString).lastPathComponent,
                 subtitle: subtitle,
                 source: .images,
                 date: nil,
-                badge: String(format: "%.2f", score),
-                openTarget: .file(path),
+                badge: badge,
+                openTarget: .file(r.path),
                 rank: rank,
                 iconData: iconData
             )
         }
+    }
+
+    /// Top 3 label names for an image, ordered by stored confidence desc.
+    /// Used to fill the result row subtitle when there's no OCR text.
+    private func topLabelNames(forImage imageID: Int64) -> [String] {
+        guard let db else { return [] }
+        var out: [String] = []
+        var stmt: OpaquePointer?
+        let sql = """
+        SELECT labels.name FROM image_labels
+        JOIN labels ON labels.id = image_labels.label_id
+        WHERE image_labels.image_id = ?
+        ORDER BY image_labels.confidence DESC LIMIT 3
+        """
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_int64(stmt, 1, imageID)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                out.append(String(cString: sqlite3_column_text(stmt, 0)))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return out
+    }
+
+    /// Convert a free-text query into an FTS5 MATCH expression. Splits on
+    /// whitespace, drops 1-char tokens, joins with `OR` so a multi-word
+    /// query lights up partial matches. Returns nil for empty input or any
+    /// token containing characters FTS5 would reject.
+    private func buildFTSMatch(from query: String) -> String? {
+        let tokens = query
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 2 }
+        guard !tokens.isEmpty else { return nil }
+        // Use prefix match (`token*`) so "glasses" lights up "glass", "glassware" too.
+        return tokens.map { "\($0)*" }.joined(separator: " OR ")
     }
 
     // MARK: - Model loading
@@ -307,9 +540,9 @@ actor ImageIndexService {
           labels_json= excluded.labels_json,
           embedding  = excluded.embedding,
           indexed_at = excluded.indexed_at
+        RETURNING id
         """
         var stmt: OpaquePointer?
-        defer { sqlite3_finalize(stmt) }
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
         sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT_IMG)
         sqlite3_bind_int64(stmt, 2, mtime)
@@ -318,10 +551,145 @@ actor ImageIndexService {
         sqlite3_bind_text(stmt, 5, ocr, -1, SQLITE_TRANSIENT_IMG)
         sqlite3_bind_text(stmt, 6, labelJSON, -1, SQLITE_TRANSIENT_IMG)
         embedding.withUnsafeBufferPointer { buf in
-            sqlite3_bind_blob(stmt, 7, buf.baseAddress, Int32(buf.count * MemoryLayout<Float>.size), SQLITE_TRANSIENT_IMG)
+            _ = sqlite3_bind_blob(stmt, 7, buf.baseAddress, Int32(buf.count * MemoryLayout<Float>.size), SQLITE_TRANSIENT_IMG)
         }
         sqlite3_bind_int64(stmt, 8, Int64(Date().timeIntervalSince1970))
-        sqlite3_step(stmt)
+        var imageID: Int64 = 0
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            imageID = sqlite3_column_int64(stmt, 0)
+        }
+        sqlite3_finalize(stmt)
+
+        guard imageID > 0 else { return }
+        writeImageLabels(imageID: imageID, labels: labels)
+    }
+
+    /// Wipe and rewrite the image→label many-to-many rows, looking up (and
+    /// lazily embedding) each label name as it appears. Cheap when most
+    /// labels are already cached.
+    private func writeImageLabels(imageID: Int64, labels: [LabelHit]) {
+        guard let db else { return }
+        // Drop any prior rows for this image — on update we re-tag from
+        // scratch since Vision may have produced a different label set.
+        var del: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM image_labels WHERE image_id = ?", -1, &del, nil) == SQLITE_OK {
+            sqlite3_bind_int64(del, 1, imageID)
+            sqlite3_step(del)
+        }
+        sqlite3_finalize(del)
+
+        for hit in labels {
+            let labelID = ensureLabel(name: hit.name)
+            guard labelID > 0 else { continue }
+            var ins: OpaquePointer?
+            if sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO image_labels(image_id, label_id, confidence) VALUES (?, ?, ?)", -1, &ins, nil) == SQLITE_OK {
+                sqlite3_bind_int64(ins, 1, imageID)
+                sqlite3_bind_int64(ins, 2, labelID)
+                sqlite3_bind_double(ins, 3, Double(hit.confidence))
+                sqlite3_step(ins)
+            }
+            sqlite3_finalize(ins)
+        }
+    }
+
+    /// Ensure a (name → id) row exists in `labels`. If the row is fresh or
+    /// its embedding is NULL, encode the label name via the CLIP text encoder
+    /// and persist the 512-d vector. Subsequent lookups are pure SQLite.
+    @discardableResult
+    private func ensureLabel(name: String) -> Int64 {
+        guard let db else { return 0 }
+        var sel: OpaquePointer?
+        var existing: (id: Int64, hasEmb: Bool) = (0, false)
+        if sqlite3_prepare_v2(db, "SELECT id, embedding IS NOT NULL FROM labels WHERE name = ?", -1, &sel, nil) == SQLITE_OK {
+            sqlite3_bind_text(sel, 1, name, -1, SQLITE_TRANSIENT_IMG)
+            if sqlite3_step(sel) == SQLITE_ROW {
+                existing = (sqlite3_column_int64(sel, 0), sqlite3_column_int(sel, 1) != 0)
+            }
+        }
+        sqlite3_finalize(sel)
+
+        if existing.id > 0 && existing.hasEmb { return existing.id }
+
+        // Either no row, or row with NULL embedding → compute the embedding now.
+        let vec = encodeText(name) ?? []
+        guard vec.count == 512 else {
+            // Encoder unavailable; still record the name so we can backfill later.
+            if existing.id > 0 { return existing.id }
+            var ins: OpaquePointer?
+            var newID: Int64 = 0
+            if sqlite3_prepare_v2(db, "INSERT INTO labels(name) VALUES (?) RETURNING id", -1, &ins, nil) == SQLITE_OK {
+                sqlite3_bind_text(ins, 1, name, -1, SQLITE_TRANSIENT_IMG)
+                while sqlite3_step(ins) == SQLITE_ROW {
+                    newID = sqlite3_column_int64(ins, 0)
+                }
+            }
+            sqlite3_finalize(ins)
+            return newID
+        }
+
+        if existing.id > 0 {
+            // UPDATE the embedding in place
+            var upd: OpaquePointer?
+            if sqlite3_prepare_v2(db, "UPDATE labels SET embedding = ? WHERE id = ?", -1, &upd, nil) == SQLITE_OK {
+                vec.withUnsafeBufferPointer { buf in
+                    _ = sqlite3_bind_blob(upd, 1, buf.baseAddress, Int32(buf.count * MemoryLayout<Float>.size), SQLITE_TRANSIENT_IMG)
+                }
+                sqlite3_bind_int64(upd, 2, existing.id)
+                sqlite3_step(upd)
+            }
+            sqlite3_finalize(upd)
+            // Refresh in-memory cache so search() picks up the new row.
+            labelCache[existing.id] = vec
+            labelCacheName[existing.id] = name
+            return existing.id
+        }
+
+        // Fresh row — INSERT with the embedding
+        var ins: OpaquePointer?
+        var newID: Int64 = 0
+        if sqlite3_prepare_v2(db, "INSERT INTO labels(name, embedding) VALUES (?, ?) RETURNING id", -1, &ins, nil) == SQLITE_OK {
+            sqlite3_bind_text(ins, 1, name, -1, SQLITE_TRANSIENT_IMG)
+            vec.withUnsafeBufferPointer { buf in
+                _ = sqlite3_bind_blob(ins, 2, buf.baseAddress, Int32(buf.count * MemoryLayout<Float>.size), SQLITE_TRANSIENT_IMG)
+            }
+            while sqlite3_step(ins) == SQLITE_ROW {
+                newID = sqlite3_column_int64(ins, 0)
+            }
+        }
+        sqlite3_finalize(ins)
+        if newID > 0 {
+            labelCache[newID] = vec
+            labelCacheName[newID] = name
+        }
+        return newID
+    }
+
+    // In-memory cache of (labelID → CLIP-text embedding). Populated lazily
+    // as labels are encountered and reused at query time so we don't
+    // re-pull 1000 BLOBs from SQLite on every search.
+    private var labelCache: [Int64: [Float]] = [:]
+    private var labelCacheName: [Int64: String] = [:]
+
+    /// Pull every label's (id, name, embedding) into the in-memory caches.
+    /// Idempotent. Run once after model load so search() can score without
+    /// hitting SQLite for label vectors.
+    private func loadLabelCache() {
+        guard let db else { return }
+        labelCache.removeAll(keepingCapacity: true)
+        labelCacheName.removeAll(keepingCapacity: true)
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT id, name, embedding FROM labels WHERE embedding IS NOT NULL", -1, &stmt, nil) == SQLITE_OK else { return }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            let name = String(cString: sqlite3_column_text(stmt, 1))
+            guard let blob = sqlite3_column_blob(stmt, 2) else { continue }
+            let bytes = sqlite3_column_bytes(stmt, 2)
+            guard bytes == 512 * MemoryLayout<Float>.size else { continue }
+            let buf = UnsafeBufferPointer(start: blob.assumingMemoryBound(to: Float.self), count: 512)
+            labelCache[id] = Array(buf)
+            labelCacheName[id] = name
+        }
     }
 
     // MARK: - Vision (labels + OCR)
