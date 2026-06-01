@@ -31,6 +31,21 @@ __pycache__/
 # Rendered video outputs (large binaries)
 Resources/*.mp4
 
+# MobileCLIP-S2 CoreML weights — too large for GitHub (>100MB single-file limit).
+# Fetched on first build by scripts/fetch-clip-models.sh.
+Sources/spotlight++/Resources/Models/*.mlmodelc/
+Sources/spotlight++/Resources/Models/clip-vocab.json
+Sources/spotlight++/Resources/Models/clip-merges.txt
+
+# Image-search prototype (large model weights live here too)
+imagesearch/models/
+imagesearch/clip_search
+imagesearch/image_search
+imagesearch/index.json
+imagesearch/clip_index.json
+imagesearch/ImageSearch.app/
+imagesearch/runs/
+
 # Secrets — never commit
 .env
 *.env

@@ -8,6 +8,12 @@ let package = Package(
         .executableTarget(
             name: "spotlight++",
             path: "Sources/spotlight++",
+            resources: [
+                // CLIP tokenizer assets + MobileCLIP-S2 CoreML models.
+                // Bundle.module reaches into here at runtime via
+                // url(forResource:withExtension:) and url(forResource:withExtension:subdirectory:).
+                .copy("Resources/Models")
+            ],
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
             ]

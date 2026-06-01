@@ -7,6 +7,7 @@ enum SearchTab: String, CaseIterable, Hashable {
     case messages   // iMessage + WhatsApp + Discord merged
     case mail
     case apps
+    case images
     case clipboard
 
     var label: String {
@@ -15,6 +16,7 @@ enum SearchTab: String, CaseIterable, Hashable {
         case .messages:  return "Messages"
         case .mail:      return "Mail"
         case .apps:      return "Apps"
+        case .images:    return "Images"
         case .clipboard: return "Clipboard"
         }
     }
@@ -35,6 +37,7 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var linearResults: [SearchResult] = []
     @Published private(set) var spotifyResults: [SearchResult] = []
     @Published private(set) var clipboardResults: [SearchResult] = []
+    @Published private(set) var imageResults: [SearchResult] = []
     @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
     @Published private(set) var isLoading: Bool = false
@@ -64,6 +67,7 @@ final class SearchViewModel: ObservableObject {
     private let linearService: LinearService
     private let spotifyService: SpotifyService
     private let clipboardService: ClipboardHistoryService
+    private let imageService: ImageIndexService
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
     // Terminal history service intentionally not queried right now —
@@ -100,6 +104,7 @@ final class SearchViewModel: ObservableObject {
         linearService: LinearService = LinearService(),
         spotifyService: SpotifyService = SpotifyService(),
         clipboardService: ClipboardHistoryService = ClipboardHistoryService(),
+        imageService: ImageIndexService = ImageIndexService(),
         smartService: SmartSearchService = SmartSearchService(),
         embeddingStore: EmbeddingStore = EmbeddingStore()
     ) {
@@ -115,6 +120,7 @@ final class SearchViewModel: ObservableObject {
         self.linearService = linearService
         self.spotifyService = spotifyService
         self.clipboardService = clipboardService
+        self.imageService = imageService
         self.smartService = smartService
         self.embeddingStore = embeddingStore
 
@@ -137,6 +143,9 @@ final class SearchViewModel: ObservableObject {
         Task { [fileService] in await fileService.warmCache() }
         Task { [notesService] in await notesService.warmCache() }
         Task { [notionService] in await notionService.warmCache() }
+        // MobileCLIP-S2 image index — warms the CoreML models and triggers
+        // an incremental sweep of ~/Pictures, ~/Desktop, ~/Downloads.
+        Task.detached { [imageService] in await imageService.warmCache() }
         // Calendar (EventKit) — used by Create Event in compose.
         Task { await CalendarEventSaver.warmAccess() }
         // Automation (Apple Events) → Messages.app — used by real iMessage
@@ -167,6 +176,7 @@ final class SearchViewModel: ObservableObject {
             return min(messagesMerged().count, Self.messagesTabResultCap)
         case .mail:      return mailResults.count
         case .apps:      return appResults.count + fileResults.count
+        case .images:    return imageResults.count
         case .clipboard: return clipboardResults.count
         }
     }
@@ -180,7 +190,7 @@ final class SearchViewModel: ObservableObject {
             whatsappResults = []; discordResults = []
             imessageResults = []; mailResults = []; notesResults = []
             notionResults = []; linearResults = []; spotifyResults = []
-            clipboardResults = []
+            clipboardResults = []; imageResults = []
             results = []; selectedIndex = 0
             isLoading = false; isAIThinking = false; aiExplanation = nil
             return
@@ -354,8 +364,9 @@ final class SearchViewModel: ObservableObject {
         async let notes     = notesService.search(query: query)
         async let notion    = notionService.search(query: query)
         async let clipboard = clipboardService.search(query: query)
-        let (b, f, a, w, d, im, ml, nt, nn, cb) = await (
-            browser, files, apps, whatsapp, discord, imsg, mail, notes, notion, clipboard
+        async let images    = imageService.search(query)
+        let (b, f, a, w, d, im, ml, nt, nn, cb, ig) = await (
+            browser, files, apps, whatsapp, discord, imsg, mail, notes, notion, clipboard, images
         )
 
         guard searchID == currentSearchID else { return }
@@ -369,6 +380,7 @@ final class SearchViewModel: ObservableObject {
         self.notesResults = nt
         self.notionResults = nn
         self.clipboardResults = cb
+        self.imageResults = ig
         self.syncDisplayedResults(resetSelection: true)
         self.isLoading = false
     }
@@ -646,6 +658,7 @@ final class SearchViewModel: ObservableObject {
         merged.append(contentsOf: linearResults)
         merged.append(contentsOf: spotifyResults)
         merged.append(contentsOf: clipboardResults)
+        merged.append(contentsOf: imageResults)
         return merged.sorted(by: rankSort)
     }
 
@@ -678,6 +691,8 @@ final class SearchViewModel: ObservableObject {
             // "Apps" pill is really "things you can open" — apps + files + folders,
             // ranked together so app exact-matches sit above looser file substrings.
             results = (appResults + fileResults).sorted(by: rankSort)
+        case .images:
+            results = imageResults
         case .clipboard:
             results = clipboardResults
         }

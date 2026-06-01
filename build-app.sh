@@ -26,6 +26,15 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${BINARY}" "${MACOS_DIR}/${APP_NAME}"
 cp "${ROOT}/Info.plist" "${CONTENTS}/Info.plist"
 
+# Copy SPM-generated resource bundles (CLIP tokenizer + MobileCLIP models).
+# Bundle.module looks for *.bundle next to the executable.
+BIN_DIR="$(swift build -c "${BUILD_CONFIG}" --show-bin-path)"
+for b in "${BIN_DIR}"/*.bundle; do
+    if [[ -d "$b" ]]; then
+        cp -R "$b" "${MACOS_DIR}/"
+    fi
+done
+
 # Ad-hoc sign so the global hotkey registration is allowed on modern macOS.
 codesign --force --deep --sign - "${APP_DIR}" >/dev/null 2>&1 || true
 

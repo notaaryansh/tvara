@@ -110,6 +110,7 @@ struct SearchResult: Identifiable, Hashable {
         case notion    = "Notion"
         case linear    = "Linear"
         case spotify   = "Spotify"
+        case images    = "Images"
 
         var icon: String {
             switch self {
@@ -130,6 +131,7 @@ struct SearchResult: Identifiable, Hashable {
             case .notion:    return "doc.richtext"
             case .linear:    return "checklist"
             case .spotify:   return "music.note"
+            case .images:    return "photo.fill"
             }
         }
 
@@ -152,6 +154,7 @@ struct SearchResult: Identifiable, Hashable {
             case .notion:    return Color(red: 0.18, green: 0.18, blue: 0.20)   // Notion dark
             case .linear:    return Color(red: 0.36, green: 0.42, blue: 0.97)   // Linear indigo
             case .spotify:   return Color(red: 0.12, green: 0.84, blue: 0.38)   // Spotify green
+            case .images:    return Color(red: 0.93, green: 0.55, blue: 0.20)   // warm orange (photo)
             }
         }
     }

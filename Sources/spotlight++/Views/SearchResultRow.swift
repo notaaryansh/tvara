@@ -54,8 +54,26 @@ struct SearchResultRow: View {
     private var iconBadge: some View {
         switch result.openTarget {
         case .file(let path):
-            FileIconView(path: path)
-                .frame(width: 36, height: 36)
+            // Image source: render the actual photo thumbnail we baked into
+            // iconData at index time. Falls through to FileIconView for any
+            // non-image file source.
+            if result.source == .images,
+               let data = result.iconData,
+               let img = NSImage(data: data) {
+                Image(nsImage: img)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                    )
+            } else {
+                FileIconView(path: path)
+                    .frame(width: 36, height: 36)
+            }
         case .whatsappChat:
             messageAvatar(platformBadge: Self.whatsappBadgeIcon)
         case .imessageChat:
