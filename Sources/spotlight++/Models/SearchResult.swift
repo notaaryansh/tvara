@@ -90,6 +90,10 @@ struct SearchResult: Identifiable, Hashable {
         /// Drive Spotify.app via AppleScript: set shuffle on, then play the
         /// given URI (typically `spotify:playlist:...`).
         case spotifyPlay(uri: String, shuffle: Bool)
+        /// Snap/move/resize the previously-frontmost app's focused window via
+        /// the macOS Accessibility API. Target PID is captured by
+        /// SearchWindowController before the panel steals focus.
+        case windowAction(WindowAction)
     }
 
     enum Source: String, CaseIterable {
@@ -111,6 +115,7 @@ struct SearchResult: Identifiable, Hashable {
         case linear    = "Linear"
         case spotify   = "Spotify"
         case images    = "Images"
+        case window    = "Window"
 
         var icon: String {
             switch self {
@@ -132,6 +137,7 @@ struct SearchResult: Identifiable, Hashable {
             case .linear:    return "checklist"
             case .spotify:   return "music.note"
             case .images:    return "photo.fill"
+            case .window:    return "macwindow"
             }
         }
 
@@ -155,6 +161,7 @@ struct SearchResult: Identifiable, Hashable {
             case .linear:    return Color(red: 0.36, green: 0.42, blue: 0.97)   // Linear indigo
             case .spotify:   return Color(red: 0.12, green: 0.84, blue: 0.38)   // Spotify green
             case .images:    return Color(red: 0.93, green: 0.55, blue: 0.20)   // warm orange (photo)
+            case .window:    return Color(red: 0.35, green: 0.55, blue: 0.75)   // calm steel-blue
             }
         }
     }

@@ -195,7 +195,13 @@ actor ImageIndexService {
             NSLog("ImageIndexService: MobileCLIP models not found in bundle")
             return false
         }
-        let cfg = MLModelConfiguration(); cfg.computeUnits = .all
+        // Indexing path: prefer CPU+GPU over ANE. ANE has thrown
+        // NSGenericException on a specific user image (HEIC with unusual
+        // color profile / 16-bit components) which Swift `try?` cannot
+        // catch — it terminates the process. CPU+GPU is ~2-3x slower
+        // (~100ms/img instead of 30ms) but robust across every CGImage
+        // shape Vision can decode.
+        let cfg = MLModelConfiguration(); cfg.computeUnits = .cpuAndGPU
         do {
             self.clipImage = try MLModel(contentsOf: imgURL, configuration: cfg)
             self.clipText  = try MLModel(contentsOf: txtURL, configuration: cfg)
@@ -221,9 +227,19 @@ actor ImageIndexService {
         let newOrChanged = files.filter { needsIndex($0) }
         if newOrChanged.isEmpty { return }
         NSLog("ImageIndexService: indexing \(newOrChanged.count) image(s)")
+        var done = 0
         for url in newOrChanged {
             indexOne(url)
+            done += 1
+            // Yield every image so search() calls (which run on the same
+            // actor) can interleave. Without this, a search waits for the
+            // ENTIRE sweep to finish before its turn comes up.
+            await Task.yield()
+            if done % 250 == 0 {
+                NSLog("ImageIndexService: \(done)/\(newOrChanged.count) indexed")
+            }
         }
+        NSLog("ImageIndexService: sweep complete (\(done) indexed)")
     }
 
     private func enumerate(roots: [URL]) -> [URL] {
@@ -259,6 +275,13 @@ actor ImageIndexService {
 
     private func indexOne(_ url: URL) {
         guard let cg = CGImageSourceCreateWithURL(url as CFURL, nil).flatMap({ CGImageSourceCreateImageAtIndex($0, 0, nil) }) else {
+            return
+        }
+        // Guard against pathological CGImages that have crashed CoreML in
+        // the past: zero-dim, absurdly huge, or 16-bit-per-component HDR.
+        guard cg.width >= 32, cg.height >= 32,
+              cg.width <= 16384, cg.height <= 16384,
+              cg.bitsPerComponent <= 8 else {
             return
         }
         let v = runVision(on: cg)

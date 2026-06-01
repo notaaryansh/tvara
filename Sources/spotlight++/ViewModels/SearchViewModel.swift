@@ -38,6 +38,7 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var spotifyResults: [SearchResult] = []
     @Published private(set) var clipboardResults: [SearchResult] = []
     @Published private(set) var imageResults: [SearchResult] = []
+    @Published private(set) var windowResults: [SearchResult] = []
     @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
     @Published private(set) var isLoading: Bool = false
@@ -68,6 +69,7 @@ final class SearchViewModel: ObservableObject {
     private let spotifyService: SpotifyService
     private let clipboardService: ClipboardHistoryService
     private let imageService: ImageIndexService
+    private let windowService: WindowManagerService
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
     // Terminal history service intentionally not queried right now —
@@ -105,6 +107,7 @@ final class SearchViewModel: ObservableObject {
         spotifyService: SpotifyService = SpotifyService(),
         clipboardService: ClipboardHistoryService = ClipboardHistoryService(),
         imageService: ImageIndexService = ImageIndexService(),
+        windowService: WindowManagerService = WindowManagerService(),
         smartService: SmartSearchService = SmartSearchService(),
         embeddingStore: EmbeddingStore = EmbeddingStore()
     ) {
@@ -121,6 +124,7 @@ final class SearchViewModel: ObservableObject {
         self.spotifyService = spotifyService
         self.clipboardService = clipboardService
         self.imageService = imageService
+        self.windowService = windowService
         self.smartService = smartService
         self.embeddingStore = embeddingStore
 
@@ -154,6 +158,17 @@ final class SearchViewModel: ObservableObject {
         Task.detached { IMessageSender.warmAccess() }
         // Automation → Spotify.app — used by playlist shuffle-play.
         Task.detached { SpotifyPlayer.warmAccess() }
+    }
+
+    // MARK: - Window-management target
+
+    /// Set by SearchWindowController BEFORE NSApp.activate() steals focus,
+    /// so window-management commands snap the previously-frontmost app's
+    /// window rather than our own panel. Pass nil to clear (e.g. opened
+    /// via status-bar with no prior focus).
+    func setWindowTarget(pid: pid_t?, appName: String?) {
+        windowService.targetPID = pid
+        windowService.targetAppName = appName
     }
 
     // MARK: - Tabs
@@ -190,11 +205,19 @@ final class SearchViewModel: ObservableObject {
             whatsappResults = []; discordResults = []
             imessageResults = []; mailResults = []; notesResults = []
             notionResults = []; linearResults = []; spotifyResults = []
-            clipboardResults = []; imageResults = []
+            clipboardResults = []; imageResults = []; windowResults = []
             results = []; selectedIndex = 0
             isLoading = false; isAIThinking = false; aiExplanation = nil
             return
         }
+
+        // Window-management commands resolve synchronously — flat scan of
+        // a ~60-entry alias table, sub-millisecond, no I/O. Setting these
+        // here (and re-syncing below) means "left" / "max" appear in the
+        // list the same frame the keystroke lands, before any async
+        // service responds.
+        windowResults = windowService.match(query: trimmed)
+        syncDisplayedResults(resetSelection: false)
 
         currentSearchID &+= 1
         let searchID = currentSearchID
@@ -659,6 +682,7 @@ final class SearchViewModel: ObservableObject {
         merged.append(contentsOf: spotifyResults)
         merged.append(contentsOf: clipboardResults)
         merged.append(contentsOf: imageResults)
+        merged.append(contentsOf: windowResults)
         return merged.sorted(by: rankSort)
     }
 
@@ -782,6 +806,14 @@ final class SearchViewModel: ObservableObject {
                 try? SpotifyPlayer.play(uri: uri, shuffle: shuffle)
             }
             return true
+
+        case .windowAction(let action):
+            // AX position/size set runs synchronously and returns in well
+            // under a frame — fine on the main actor. Returning true
+            // closes the panel; the freshly-snapped window comes back to
+            // the foreground because its app was already the previously
+            // frontmost.
+            return windowService.execute(action)
         }
     }
 
@@ -1042,7 +1074,7 @@ final class SearchViewModel: ObservableObject {
         browserResults = []; fileResults = []; appResults = []
         whatsappResults = []; discordResults = []
         imessageResults = []; mailResults = []; notesResults = []
-        clipboardResults = []
+        clipboardResults = []; windowResults = []
         results = []; selectedIndex = 0
         isLoading = false; isAIThinking = false; aiExplanation = nil
         activeTab = .all

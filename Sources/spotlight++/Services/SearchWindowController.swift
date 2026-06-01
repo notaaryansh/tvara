@@ -58,6 +58,21 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
     private func show() {
         guard let window else { return }
 
+        // BEFORE we steal focus, capture the app that was frontmost so
+        // window-management commands target THAT app, not our own panel.
+        // Skip ourselves and the loginwindow PID. Same critical timing
+        // as the text-selection grab below — once NSApp.activate fires,
+        // frontmostApplication is us.
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        if let app = frontmost, app.processIdentifier != getpid() {
+            viewModel.setWindowTarget(
+                pid: app.processIdentifier,
+                appName: app.localizedName
+            )
+        } else {
+            viewModel.setWindowTarget(pid: nil, appName: nil)
+        }
+
         // BEFORE we steal focus, try to grab whatever text the user has
         // selected in the frontmost app. If they have a selection, we
         // open straight into "acting mode" with that text as the context
