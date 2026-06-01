@@ -1,0 +1,153 @@
+# WhatsApp URL probe run 20260529-233854
+# PHONE=919325525029  STANZA=3A8D5E50D816940D7DC5  TEXT='Stay in your pants'
+#
+
+[ 0] send-phone-baseline
+  URL: whatsapp://send?phone=919325525029
+  hyp: known: opens new-chat composer
+  result: (auto mode — no observation captured)
+
+[ 1] chat-jid-baseline-lid
+  URL: whatsapp://chat?jid=198535031029815@lid
+  hyp: known: opens drishtu chat
+  result: (auto mode — no observation captured)
+
+[ 2] msg-stanza-raw
+  URL: whatsapp://message/3A8D5E50D816940D7DC5
+  hyp: WAMessageDeepLink with raw stanza
+  result: (auto mode — no observation captured)
+
+[ 3] msg-ser-snet
+  URL: whatsapp://message/false_919325525029@s.whatsapp.net_3A8D5E50D816940D7DC5
+  hyp: with @s.whatsapp.net serialized
+  result: (auto mode — no observation captured)
+
+[ 4] msg-ser-cus
+  URL: whatsapp://message/false_919325525029@c.us_3A8D5E50D816940D7DC5
+  hyp: with @c.us serialized
+  result: (auto mode — no observation captured)
+
+[ 5] msg-ser-lid
+  URL: whatsapp://message/false_198535031029815@lid_3A8D5E50D816940D7DC5
+  hyp: with @lid serialized
+  result: (auto mode — no observation captured)
+
+[ 6] send-path-phone
+  URL: whatsapp://send/919325525029
+  hyp: path-based send w/ phone
+  result: (auto mode — no observation captured)
+
+[ 7] send-path-stanza
+  URL: whatsapp://send/3A8D5E50D816940D7DC5
+  hyp: path-based send w/ stanza
+  result: (auto mode — no observation captured)
+
+[ 8] send-path-ser
+  URL: whatsapp://send/false_919325525029@s.whatsapp.net_3A8D5E50D816940D7DC5
+  hyp: path-based send w/ serialized
+  result: (auto mode — no observation captured)
+
+[ 9] send-path-phone-stanza
+  URL: whatsapp://send/919325525029/3A8D5E50D816940D7DC5
+  hyp: two-segment path
+  result: (auto mode — no observation captured)
+
+[10] send-query-msg
+  URL: whatsapp://send?phone=919325525029&msg=3A8D5E50D816940D7DC5
+  hyp: send query + msg
+  result: (auto mode — no observation captured)
+
+[11] send-query-msgkey
+  URL: whatsapp://send?phone=919325525029&msgKey=false_919325525029@s.whatsapp.net_3A8D5E50D816940D7DC5
+  hyp: send query + msgKey
+  result: (auto mode — no observation captured)
+
+[12] send-query-id
+  URL: whatsapp://send?phone=919325525029&id=3A8D5E50D816940D7DC5
+  hyp: send query + id
+  result: (auto mode — no observation captured)
+
+[13] c-path
+  URL: whatsapp://c/3A8D5E50D816940D7DC5
+  hyp: WAContactDeepLink c path
+  result: (auto mode — no observation captured)
+
+[14] contact-path
+  URL: whatsapp://contact/3A8D5E50D816940D7DC5
+  hyp: contact path
+  result: (auto mode — no observation captured)
+
+[15] c-path-ser
+  URL: whatsapp://c/false_919325525029@s.whatsapp.net_3A8D5E50D816940D7DC5
+  hyp: c path + serialized
+  result: (auto mode — no observation captured)
+
+[16] chat-msg-snet
+  URL: whatsapp://chat?jid=919325525029@s.whatsapp.net&msg=3A8D5E50D816940D7DC5
+  hyp: @s.whatsapp.net jid + msg
+  result: (auto mode — no observation captured)
+
+[17] chat-msgkey-snet
+  URL: whatsapp://chat?jid=919325525029@s.whatsapp.net&msgKey=false_919325525029@s.whatsapp.net_3A8D5E50D816940D7DC5
+  hyp: msgKey
+  result: (auto mode — no observation captured)
+
+[18] chat-msgKeyId-snet
+  URL: whatsapp://chat?jid=919325525029@s.whatsapp.net&msgKeyId=3A8D5E50D816940D7DC5
+  hyp: msgKeyId
+  result: (auto mode — no observation captured)
+
+[19] chat-stanzaId-snet
+  URL: whatsapp://chat?jid=919325525029@s.whatsapp.net&stanzaId=3A8D5E50D816940D7DC5
+  hyp: stanzaId
+  result: (auto mode — no observation captured)
+
+[20] chat-message_id-snet
+  URL: whatsapp://chat?jid=919325525029@s.whatsapp.net&message_id=3A8D5E50D816940D7DC5
+  hyp: message_id (snake case)
+  result: (auto mode — no observation captured)
+
+[21] wame-c-stanza
+  URL: https://wa.me/c/3A8D5E50D816940D7DC5
+  hyp: wa.me/c/ contact
+  result: (auto mode — no observation captured)
+
+[22] wame-message-stanza
+  URL: https://wa.me/message/3A8D5E50D816940D7DC5
+  hyp: wa.me/message/
+  result: (auto mode — no observation captured)
+
+[23] wame-message-ser
+  URL: https://wa.me/message/false_919325525029@s.whatsapp.net_3A8D5E50D816940D7DC5
+  hyp: wa.me/message/ serialized
+  result: (auto mode — no observation captured)
+
+[24] wame-phone-msg
+  URL: https://wa.me/919325525029?msg=3A8D5E50D816940D7DC5
+  hyp: wa.me phone + msg query
+  result: (auto mode — no observation captured)
+
+[25] openchat-jid
+  URL: whatsapp://open-chat?jid=919325525029@s.whatsapp.net&msg=3A8D5E50D816940D7DC5
+  hyp: open-chat path
+  result: (auto mode — no observation captured)
+
+[26] chats-jid-msg
+  URL: whatsapp://chats?jid=919325525029@s.whatsapp.net&msg=3A8D5E50D816940D7DC5
+  hyp: chats path
+  result: (auto mode — no observation captured)
+
+[27] navigate-msg
+  URL: whatsapp://navigate/message/3A8D5E50D816940D7DC5
+  hyp: navigate path
+  result: (auto mode — no observation captured)
+
+[28] goto-msg
+  URL: whatsapp://goto/message/3A8D5E50D816940D7DC5
+  hyp: goto path
+  result: (auto mode — no observation captured)
+
+[29] p-stanza
+  URL: whatsapp://p/3A8D5E50D816940D7DC5
+  hyp: p path (product?)
+  result: (auto mode — no observation captured)
