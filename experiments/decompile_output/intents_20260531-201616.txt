@@ -1,0 +1,1108 @@
+openjdk version "21.0.11" 2026-04-21
+OpenJDK Runtime Environment Homebrew (build 21.0.11)
+OpenJDK 64-Bit Server VM Homebrew (build 21.0.11, mixed mode)
+INFO  Using log config file: jar:file:/opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Framework/Generic/lib/Generic.jar!/generic.log4j.xml (LoggingInitialization)  
+INFO  Using log file: /Users/aaryanshsahay/Library/ghidra/ghidra_12.1.1_PUBLIC/application.log (LoggingInitialization)  
+INFO  Loading user preferences: /Users/aaryanshsahay/Library/ghidra/ghidra_12.1.1_PUBLIC/preferences (Preferences)  
+INFO  Searching for classes... (ClassSearcher)  
+INFO  Class search complete (530 ms) (ClassSearcher)  
+INFO  Initializing SSL Context (DefaultSSLContextInitializer)  
+INFO  Initializing Random Number Generator... (SecureRandomFactory)  
+INFO  Random Number Generator initialization complete: NativePRNGNonBlocking (SecureRandomFactory)  
+INFO  Trust manager disabled, cacerts have not been set (DefaultTrustManagerFactory)  
+INFO  Headless startup complete (1701 ms) (AnalyzeHeadless)  
+INFO  Class searcher loaded 210 extension points (114 false positives) (ClassSearcher)  
+INFO  HEADLESS Script Paths:
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/DecompilerDependent/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/Atmel/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/DATA/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/PDB/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/VersionTracking/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/Base/ghidra_scripts
+    /Users/aaryanshsahay/Documents/GitHub/spotlight++/experiments
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/MicrosoftCodeAnalyzer/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/SystemEmulation/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/Decompiler/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/FunctionID/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/FileFormats/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/8051/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Debug/Debugger-rmi-trace/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/BSim/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Debug/Debugger/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/JVM/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/WildcardAssembler/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/GnuDemangler/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/PIC/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/PyGhidra/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/SwiftDemangler/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/BytePatterns/ghidra_scripts (HeadlessAnalyzer)  
+INFO  HEADLESS: execution starts (HeadlessAnalyzer)  
+INFO  Creating project: /tmp/ghidra_intents/intents_proj (HeadlessAnalyzer)  
+INFO  Creating project: /tmp/ghidra_intents/intents_proj (DefaultProject)  
+INFO  REPORT: Processing input files:  (HeadlessAnalyzer)  
+INFO       project: /tmp/ghidra_intents/intents_proj (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+WARN  Using unknown opinion: Mac OS X Mach-O, AARCH64:LE:64:AppleSilicon:default (LcsHintLoadSpecChooser)  
+INFO  Using Loader: Mac OS X Mach-O (ProgramLoader)  
+INFO  Using Language/Compiler: AARCH64:LE:64:AppleSilicon:default (ProgramLoader)  
+INFO  Using Library Search Path: [., /System/Library/dyld/dyld_shared_cache_arm64e, /System/Library/dyld/dyld_shared_cache_x86_64, /System/Library/dyld/dyld_shared_cache_x86_64h, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_arm64e, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_x86_64, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_x86_64h, /Users/aaryanshsahay/Library/Java/Extensions, /Library/Java/Extensions, /Network/Library/Java/Extensions, /System/Library/Java/Extensions, /usr/lib/java] (ProgramLoader)  
+INFO  Additional info:
+Loading file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents?MD5=12d9f1b5a8c1be20843ce24a8ea1c838...
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+SymbolTableCommand> Failed to markup: LC_SYMTAB (symbols) - Intents
+Intents: installed 8 objc SpecExtensions
+------------------------------------------------
+
+Linking the External Programs of 'Intents' to imported libraries...
+  [/usr/lib/libobjc.A.dylib] -> not found in project
+  [/usr/lib/libc++.1.dylib] -> not found in project
+  [@rpath/SharedModules.framework/Versions/A/SharedModules] -> not found in project
+  [@rpath/WAAppKitBridge.framework/Versions/A/WAAppKitBridge] -> not found in project
+  [/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation] -> not found in project
+  [/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation] -> not found in project
+  [/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation] -> not found in project
+  [/System/Library/Frameworks/AVFAudio.framework/Versions/A/AVFAudio] -> not found in project
+  [/System/Library/Frameworks/CoreData.framework/Versions/A/CoreData] -> not found in project
+  [/System/iOSSupport/System/Library/Frameworks/UIKit.framework/Versions/A/UIKit] -> not found in project
+  [/usr/lib/libsqlite3.dylib] -> not found in project
+  [/usr/lib/libSystem.B.dylib] -> not found in project
+  [/usr/lib/swift/libswift_Concurrency.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCore.dylib] -> not found in project
+  [/usr/lib/swift/libswiftDarwin.dylib] -> not found in project
+  [/usr/lib/swift/libswiftObjectiveC.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreFoundation.dylib] -> not found in project
+  [/usr/lib/swift/libswiftDispatch.dylib] -> not found in project
+  [/usr/lib/swift/libswiftXPC.dylib] -> not found in project
+  [/usr/lib/swift/libswiftIOKit.dylib] -> not found in project
+  [/usr/lib/swift/libswiftQuartzCore.dylib] -> not found in project
+  [/usr/lib/swift/libswiftMetal.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreImage.dylib] -> not found in project
+  [/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib] -> not found in project
+  [/usr/lib/swift/libswiftOSLog.dylib] -> not found in project
+  [/usr/lib/swift/libswiftos.dylib] -> not found in project
+  [/System/Library/Frameworks/UserNotifications.framework/Versions/A/UserNotifications] -> not found in project
+  [/usr/lib/swift/libswiftCoreLocation.dylib] -> not found in project
+  [/usr/lib/swift/libswiftAccelerate.dylib] -> not found in project
+  [/usr/lib/swift/libswiftsimd.dylib] -> not found in project
+  [/usr/lib/swift/libswiftSpatial.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCompression.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreMedia.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreAudio.dylib] -> not found in project
+  [/usr/lib/swift/libswiftAVFoundation.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreMIDI.dylib] -> not found in project
+  [/usr/lib/swift/libswiftIntents.dylib] -> not found in project
+  [/usr/lib/swift/libswiftFoundation.dylib] -> not found in project
+  [/System/iOSSupport/usr/lib/swift/libswiftUIKit.dylib] -> not found in project
+------------------------------------------------
+
+ (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  hit non-returning function, restarting decompiler switch analyzer later (DecompilerSwitchAnalyzer)  
+ERROR Unexpected exception getting Decompiler result (InternalResultListener) java.util.concurrent.ExecutionException: java.lang.ArrayIndexOutOfBoundsException: Index 2 out of bounds for length 2
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:191)
+	at generic.concurrent.QResult.<init>(QResult.java:40)
+	at generic.concurrent.FutureTaskMonitor.run(FutureTaskMonitor.java:77)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: java.lang.ArrayIndexOutOfBoundsException: Index 2 out of bounds for length 2
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer.findMessages(ObjcMessageAnalyzer.java:325)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer.fixMsgSendCalls(ObjcMessageAnalyzer.java:370)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer$1.process(ObjcMessageAnalyzer.java:148)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer$1.process(ObjcMessageAnalyzer.java:145)
+	at ghidra.app.decompiler.parallel.DecompilerCallback.process(DecompilerCallback.java:80)
+	at ghidra.app.decompiler.parallel.DecompilerCallback.process(DecompilerCallback.java:41)
+	at generic.concurrent.ConcurrentQ$CallbackCallable.call(ConcurrentQ.java:706)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at generic.concurrent.FutureTaskMonitor.run(FutureTaskMonitor.java:75)
+	... 3 more
+ 
+ERROR Unexpected exception getting Decompiler result (InternalResultListener) java.util.concurrent.ExecutionException: java.lang.ArrayIndexOutOfBoundsException: Index 2 out of bounds for length 2
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:191)
+	at generic.concurrent.QResult.<init>(QResult.java:40)
+	at generic.concurrent.FutureTaskMonitor.run(FutureTaskMonitor.java:77)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: java.lang.ArrayIndexOutOfBoundsException: Index 2 out of bounds for length 2
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer.findMessages(ObjcMessageAnalyzer.java:325)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer.fixMsgSendCalls(ObjcMessageAnalyzer.java:370)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer$1.process(ObjcMessageAnalyzer.java:148)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer$1.process(ObjcMessageAnalyzer.java:145)
+	at ghidra.app.decompiler.parallel.DecompilerCallback.process(DecompilerCallback.java:80)
+	at ghidra.app.decompiler.parallel.DecompilerCallback.process(DecompilerCallback.java:41)
+	at generic.concurrent.ConcurrentQ$CallbackCallable.call(ConcurrentQ.java:706)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at generic.concurrent.FutureTaskMonitor.run(FutureTaskMonitor.java:75)
+	... 3 more
+ 
+INFO  Packed database cache: /var/tmp/aaryanshsahay-ghidra/packed-db-cache (PackedDatabaseCache)  
+INFO  Applied data type archive: mac_osx (ApplyDataArchiveAnalyzer)  
+ERROR Unexpected exception getting Decompiler result (InternalResultListener) java.util.concurrent.ExecutionException: java.lang.ArrayIndexOutOfBoundsException: Index 1 out of bounds for length 1
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:191)
+	at generic.concurrent.QResult.<init>(QResult.java:40)
+	at generic.concurrent.FutureTaskMonitor.run(FutureTaskMonitor.java:77)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: java.lang.ArrayIndexOutOfBoundsException: Index 1 out of bounds for length 1
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer.findMessages(ObjcMessageAnalyzer.java:324)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer.fixMsgSendCalls(ObjcMessageAnalyzer.java:370)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer$1.process(ObjcMessageAnalyzer.java:148)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer$1.process(ObjcMessageAnalyzer.java:145)
+	at ghidra.app.decompiler.parallel.DecompilerCallback.process(DecompilerCallback.java:80)
+	at ghidra.app.decompiler.parallel.DecompilerCallback.process(DecompilerCallback.java:41)
+	at generic.concurrent.ConcurrentQ$CallbackCallable.call(ConcurrentQ.java:706)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at generic.concurrent.FutureTaskMonitor.run(FutureTaskMonitor.java:75)
+	... 3 more
+ 
+WARN  Decompiling 10002cb40: Unable to read bytes at ram:fffffffffffffff8 (DecompileCallback)  
+WARN  Decompiling 10002cb40: Unable to read bytes at ram:fffffffffffffff8 (DecompileCallback)  
+INFO  -----------------------------------------------------
+    AARCH64 ELF PLT Thunks                     0.000 secs
+    ASCII Strings                              0.292 secs
+    Apply Data Archives                        0.178 secs
+    Basic Constant Reference Analyzer          1.180 secs
+    CFStrings                                  0.006 secs
+    Call Convention ID                         2.699 secs
+    Call-Fixup Installer                       0.045 secs
+    Create Address Tables                      0.075 secs
+    Create Address Tables - One Time           0.280 secs
+    Create Function                            0.158 secs
+    Data Reference                             0.204 secs
+    Decompiler Switch Analysis                47.967 secs
+    Decompiler Switch Analysis - One Time      2.858 secs
+    Demangler GNU                              0.155 secs
+    Demangler Swift                           10.971 secs
+    Disassemble                                0.338 secs
+    Disassemble Entry Points                   0.062 secs
+    Embedded Media                             0.015 secs
+    External Entry References                  0.000 secs
+    Function ID                                0.022 secs
+    Function Start Search                      0.076 secs
+    Function Start Search After Code           0.076 secs
+    Function Start Search After Data           0.042 secs
+    Function Start Search delayed - One Time   0.075 secs
+    Mach-O Function Starts                     0.028 secs
+    Non-Returning Functions - Discovered       0.097 secs
+    Non-Returning Functions - Known            0.004 secs
+    Objective-C Message Analyzer             105.360 secs
+    Objective-C Type Metadata Analyzer         0.702 secs
+    Reference                                  0.211 secs
+    Shared Return Calls                        0.188 secs
+    Stack                                      0.864 secs
+    Subroutine References                      0.363 secs
+    Subroutine References - One Time           0.000 secs
+    Swift Type Metadata Analyzer               0.129 secs
+-----------------------------------------------------
+     Total Time   175 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  REPORT: Execute script: decomp_intents.java  (HeadlessAnalyzer)  
+INFO  SCRIPT: /Users/aaryanshsahay/Documents/GitHub/spotlight++/experiments/decomp_intents.java (HeadlessAnalyzer)  
+INFO  decomp_intents.java> ############# INTENTS DECOMP ############# (GhidraScript)  
+INFO  decomp_intents.java> Total functions: 4756 (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WAIntentHandler::handlerForIntent: (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x100004090 (GhidraScript)  
+INFO  decomp_intents.java> Size:     1584 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+ID WAIntentHandler::handlerForIntent_(ID param_1,SEL param_2,ID param_3)
+
+{
+  int iVar1;
+  ID IVar2;
+  undefined8 uVar3;
+  ID IVar4;
+  ID IVar5;
+  ID IVar6;
+  ID IVar7;
+  ID IVar8;
+  ID IVar9;
+  ID IVar10;
+  undefined *puVar11;
+  ulong uVar12;
+  undefined1 auVar13 [16];
+  undefined1 auStack_70 [8];
+  long local_68;
+  
+  local_68 = *(long *)PTR____stack_chk_guard_100094000;
+  FUN_1000046c0(param_3);
+  if (DAT_1000af1c0 != -1) {
+    _dispatch_once(&DAT_1000af1c0,&PTR___NSConcreteGlobalBlock_100097650);
+  }
+  puVar11 = PTR_s_appLock_10009d240;
+  IVar2 = _objc_msgSend(DAT_1000af1b0,PTR_s_appLock_10009d240);
+  IVar2 = _objc_msgSend(IVar2,PTR_s_isEnabled_10009d248);
+  if ((IVar2 & 1) == 0) {
+LAB_100004178:
+    FUN_10000494c();
+  }
+  else {
+    IVar2 = _objc_msgSend(DAT_1000af1b0,puVar11);
+    IVar2 = _objc_msgSend(IVar2,PTR_s_isWithinGracePeriod_10009d250);
+    FUN_10000494c(0);
+    if ((IVar2 & 1) == 0) {
+      FUN_100004718(auStack_70);
+      _WALogWriterWriteWithBufferRollout(0,6,auStack_70,"intent//locked");
+      _wa_exit(0);
+      goto LAB_100004178;
+    }
+  }
+  _wa_dispatch_sync_now_on_main_or_async(&PTR___NSConcreteGlobalBlock_1000975f0);
+  uVar3 = FUN_100004920(PTR__OBJC_CLASS___INSendMessageIntent_10009c938);
+  IVar2 = _objc_msgSend(param_3,PTR_s_isKindOfClass__10009d270,uVar3);
+  if ((int)IVar2 == 0) {
+    FUN_100004920(PTR__OBJC_CLASS___INSearchForMessagesIntent_10009c948);
+    iVar1 = FUN_100004910();
+    if (iVar1 == 0) {
+      FUN_100004920(PTR__OBJC_CLASS___INSetMessageAttributeIntent_10009c960);
+      iVar1 = FUN_100004910();
+      if (iVar1 == 0) {
+        FUN_100004920(PTR__OBJC_CLASS___INStartCallIntent_10009c970);
+        iVar1 = FUN_100004910();
+        if (iVar1 == 0) {
+          FUN_100004920(PTR__OBJC_CLASS___INStartAudioCallIntent_10009c980);
+          iVar1 = FUN_100004910();
+          if (iVar1 == 0) {
+            FUN_100004920(PTR__OBJC_CLASS___INStartVideoCallIntent_10009c990);
+            iVar1 = FUN_100004910();
+            if (iVar1 == 0) {
+              IVar2 = 0;
+              goto LAB_100004464;
+            }
+            _objc_msgSend(param_1,PTR_s_exitAppIfNotAuthorizedForCapabil_10009d2f8,2);
+            puVar11 = PTR_WAStartVideoCallIntentHandler_10009c998;
+          }
+          else {
+            _objc_msgSend(param_1,PTR_s_exitAppIfNotAuthorizedForCapabil_10009d2f8,1);
+            puVar11 = PTR_WAStartAudioCallIntentHandler_10009c988;
+          }
+          IVar2 = _objc_alloc(puVar11);
+          auVar13 = FUN_10000493c();
+          IVar4 = _objc_msgSend(auVar13._0_8_,auVar13._8_8_);
+          IVar2 = _objc_msgSend(IVar2,PTR_s_initWithIntentsExtensionHelper__10009d300,IVar4);
+        }
+        else {
+          IVar2 = _objc_alloc(PTR_WAStartCallIntentHandler_10009c978);
+          auVar13 = FUN_10000493c();
+          IVar4 = _objc_msgSend(auVar13._0_8_,auVar13._8_8_);
+          auVar13 = FUN_100004960(DAT_1000af1b0);
+          IVar5 = _objc_msgSend(auVar13._0_8_,auVar13._8_8_);
+          IVar2 = _objc_msgSend(IVar2,PTR_s_initWithIntentsExtensionHelper_p_10009d2f0,IVar4,IVar5);
+        }
+      }
+      else {
+        IVar2 = _objc_alloc(PTR_WASetMessageAttributeIntentHandler_10009c968);
+        DAT_1000af1a8 = DAT_1000af1a8 + 1;
+        uVar12 = (ulong)DAT_1000af1a8;
+        auVar13 = FUN_100004960(DAT_1000af1b0);
+        IVar4 = _objc_msgSend(auVar13._0_8_,auVar13._8_8_);
+        IVar5 = _objc_msgSend(DAT_1000af1b0,PTR_s_chatStorage_10009d290);
+        IVar6 = _objc_msgSend(DAT_1000af1b0,PTR_s_localKeyValueStore_10009d2e0);
+        IVar7 = _objc_msgSend(DAT_1000af1b0,PTR_s_intentsExtensionHelper_10009d2a8);
+        IVar2 = _objc_msgSend(IVar2,PTR_s_initWithInstanceID_preferences_c_10009d2e8,uVar12,IVar4,
+                              IVar5,IVar6,IVar7,DAT_1000af1b0);
+      }
+    }
+    else {
+      IVar2 = _objc_alloc(PTR__OBJC_CLASS___WAIntentPersonProvider_10009c950);
+      IVar4 = _objc_msgSend(DAT_1000af1b0,PTR_s_mappedContactsStorage_10009d2b8);
+      IVar5 = _objc_msgSend(DAT_1000af1b0,PTR_s_nameDirectory_10009d2c0);
+      IVar2 = _objc_msgSend(IVar2,PTR_s_initWithContactsStorage_nameDire_10009d2c8,IVar4,IVar5);
+      FUN_10000494c(0);
+      IVar4 = _objc_alloc(PTR_WASearchForMessageIntentHandler_10009c958);
+      DAT_1000af1a8 = DAT_1000af1a8 + 1;
+      uVar12 = (ulong)DAT_1000af1a8;
+      IVar5 = _objc_msgSend(DAT_1000af1b0,PTR_s_stashedMessageRetriever_10009d280);
+      auVar13 = FUN_100004960(DAT_1000af1b0);
+      IVar6 = _objc_msgSend(auVar13._0_8_,auVar13._8_8_);
+      IVar7 = _objc_msgSend(DAT_1000af1b0,PTR_s_messageFormatter_10009d2d0);
+      IVar8 = _objc_msgSend(DAT_1000af1b0,puVar11);
+      IVar9 = _objc_msgSend(DAT_1000af1b0,PTR_s_intentsExtensionHelper_10009d2a8);
+      IVar2 = _objc_msgSend(IVar4,PTR_s_initWithInstanceID_stashedMessag_10009d2d8,uVar12,IVar5,
+                            IVar6,IVar7,IVar8,IVar2,IVar9);
+    }
+  }
+  else {
+    IVar2 = _objc_alloc(PTR_WASendMessageIntentHandler_10009c940);
+    IVar4 = _objc_msgSend(DAT_1000af1b0,PTR_s_backedUpKeyValueStore_10009d278);
+    IVar5 = _objc_msgSend(DAT_1000af1b0,PTR_s_stashedMessageRetriever_10009d280);
+    IVar6 = _objc_msgSend(DAT_1000af1b0,PTR_s_accountProvider_10009d288);
+    IVar7 = _objc_msgSend(DAT_1000af1b0,PTR_s_chatStorage_10009d290);
+    auVar13 = FUN_100004960(DAT_1000af1b0);
+    IVar8 = _objc_msgSend(auVar13._0_8_,auVar13._8_8_);
+    IVar9 = _objc_msgSend(DAT_1000af1b0,PTR_s_intentSendMessageRequestFactory_10009d2a0);
+    auVar13 = FUN_10000493c();
+    IVar10 = _objc_msgSend(auVar13._0_8_,auVar13._8_8_);
+    IVar2 = _objc_msgSend(IVar2,PTR_s_initWithBackedUpKeyValueStore_st_10009d2b0,IVar4,IVar5,IVar6,
+                          IVar7,IVar8,IVar9,IVar10);
+  }
+LAB_100004464:
+  if (*(long *)PTR____stack_chk_guard_100094000 != local_68) {
+                    /* WARNING: Subroutine does not return */
+    ___stack_chk_fail(0);
+  }
+  return IVar2;
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WAIntentHandler::exitAppIfNotAuthorizedForCapability: (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x100004768 (GhidraScript)  
+INFO  decomp_intents.java> Size:     44 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void WAIntentHandler::exitAppIfNotAuthorizedForCapability_(ID param_1,SEL param_2,long_long param_3)
+
+{
+  long lVar1;
+  
+  lVar1 = FUN_10000e024(param_3);
+  if (1 < lVar1 - 1U) {
+    return;
+  }
+  _wa_exit(0);
+  return;
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WAIntentHandler::sharedStorage (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x100004794 (GhidraScript)  
+INFO  decomp_intents.java> Size:     28 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WAIntentHandler::sharedStorage(ID param_1,SEL param_2)
+
+{
+  return DAT_1000af1b8;
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WASearchForMessageIntentHandler::handleSearchForMessages:completion: (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x10000867c (GhidraScript)  
+INFO  decomp_intents.java> Size:     416 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainBlock replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x20 bytes */
+
+void WASearchForMessageIntentHandler::handleSearchForMessages_completion_
+               (ID param_1,SEL param_2,ID param_3,ID param_4,undefined4 param_5)
+
+{
+  undefined *puVar1;
+  undefined1 in_ZR;
+  ID IVar2;
+  undefined8 uVar3;
+  undefined8 extraout_x8;
+  undefined *local_c0;
+  undefined8 local_b8;
+  undefined1 *local_b0;
+  undefined *puStack_a8;
+  ID local_a0;
+  ID local_98;
+  undefined **local_90;
+  undefined *local_88;
+  undefined8 local_80;
+  code *local_78;
+  undefined *puStack_70;
+  ID local_68;
+  ID local_60;
+  undefined8 local_58;
+  
+  FUN_10000ae44();
+  local_58 = extraout_x8;
+  FUN_10000af30();
+  FUN_10000aedc();
+  puVar1 = PTR___NSConcreteStackBlock_100094008;
+  uVar3 = DAT_100086420;
+  local_88 = PTR___NSConcreteStackBlock_100094008;
+  local_80 = DAT_100086420;
+  local_78 = FUN_10000881c;
+  puStack_70 = &DAT_1000978f0;
+  local_68 = param_1;
+  local_60 = param_4;
+  _objc_msgSend(param_1,PTR_s_log_forSearchMessagesIntent__10009d6c8,&cf_handle_search,param_3);
+  IVar2 = _objc_msgSend(*(ID *)(param_1 + 0x28),PTR_s_isEnabled_10009d6d0);
+  if (((int)IVar2 == 0) ||
+     (IVar2 = _objc_msgSend(*(ID *)(param_1 + 0x28),PTR_s_isWithinGracePeriod_10009d6d8),
+     (IVar2 & 1) != 0)) {
+    IVar2 = _objc_msgSend((ID)PTR_WAIntentHandler_10009ca60,PTR_s_sharedStorage_10009d6e8);
+    local_c0 = puVar1;
+    local_b8 = uVar3;
+    local_b0 = &LAB_100008928;
+    puStack_a8 = &DAT_100097950;
+    FUN_10000af00(IVar2);
+    local_a0 = param_1;
+    local_90 = &local_88;
+    uVar3 = FUN_10000aecc();
+    local_98 = param_3;
+    FUN_10000aeec(uVar3,PTR_s_runWhileLoaded__10009d6f8,&local_c0);
+    FUN_10000ae68();
+    FUN_10000b018();
+  }
+  else {
+    IVar2 = FUN_10000aeb0();
+    IVar2 = _objc_msgSend(IVar2,PTR_s_initWithCode_userActivity__10009d6e0,6,0);
+    (*local_78)(&local_88,IVar2);
+  }
+  FUN_10000ae80();
+  FUN_10000ae70();
+  FUN_10000ae90(0);
+  FUN_10000ae78();
+  FUN_10000ae30(local_58);
+  if ((bool)in_ZR) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail();
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WASearchForMessageIntentHandler::reallyHandleSearchForMessages:completion: (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x100008a7c (GhidraScript)  
+INFO  decomp_intents.java> Size:     1648 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x20 bytes */
+
+void WASearchForMessageIntentHandler::reallyHandleSearchForMessages_completion_
+               (ID param_1,SEL param_2,ID param_3,ID param_4,undefined4 param_5)
+
+{
+  undefined8 uVar1;
+  undefined *puVar2;
+  undefined *puVar3;
+  undefined *op;
+  undefined1 uVar4;
+  ID IVar5;
+  ID IVar6;
+  long lVar7;
+  ulong uVar8;
+  ulong uVar9;
+  ID IVar10;
+  ID IVar11;
+  undefined8 extraout_x8;
+  ulong uVar12;
+  undefined8 uVar13;
+  undefined8 uVar14;
+  undefined1 auVar15 [16];
+  ID local_198;
+  undefined *local_180;
+  undefined8 local_178;
+  code *local_170;
+  undefined *puStack_168;
+  undefined8 local_160;
+  undefined8 uStack_158;
+  ID local_150;
+  ID local_148;
+  undefined *local_140;
+  undefined8 local_138;
+  undefined1 *local_130;
+  undefined *puStack_128;
+  ID local_120;
+  ID IStack_118;
+  ID local_110;
+  undefined **local_108;
+  undefined8 local_c0;
+  long lStack_b8;
+  long *local_b0;
+  undefined8 uStack_a8;
+  undefined8 local_a0;
+  undefined8 uStack_98;
+  undefined8 uStack_90;
+  undefined8 uStack_88;
+  undefined8 local_80;
+  
+  FUN_10000ae44();
+  local_80 = extraout_x8;
+  FUN_10000af30();
+  FUN_10000af64();
+  puVar2 = PTR___NSConcreteStackBlock_100094008;
+  uVar1 = DAT_100086420;
+  uVar14 = *(undefined8 *)(param_1 + 0x30);
+  uVar13 = *(undefined8 *)(param_1 + 0x20);
+  IVar11 = *(ID *)(param_1 + 0x10);
+  local_180 = PTR___NSConcreteStackBlock_100094008;
+  local_178 = DAT_100086420;
+  local_170 = FUN_1000090ec;
+  puStack_168 = &DAT_100097980;
+  FUN_10000af64(uVar13);
+  local_160 = uVar14;
+  uStack_158 = uVar13;
+  local_150 = param_1;
+  local_148 = param_4;
+  FUN_10000aecc(IVar11);
+  puVar3 = PTR__OBJC_CLASS___NSSet_10009caa0;
+  IVar5 = _objc_msgSend(param_3,PTR_s_notificationIdentifiers_10009d868);
+  uVar4 = IVar5 == 0;
+  IVar6 = *(ID *)PTR____NSArray0___100094040;
+  if (!(bool)uVar4) {
+    IVar6 = IVar5;
+  }
+  IVar6 = _objc_msgSend((ID)puVar3,PTR_s_setWithArray__10009d898,IVar6);
+  lVar7 = FUN_10000aff0(IVar6);
+  if (lVar7 == 0) {
+    IVar6 = _objc_msgSend(param_3,PTR_s_identifiers_10009d878);
+    lVar7 = FUN_10000aff0();
+    if (lVar7 == 0) {
+      IVar6 = _objc_msgSend(param_3,PTR_s_conversationIdentifiers_10009d8e8);
+      local_198 = _objc_msgSend(IVar6,PTR_s_firstObject_10009d818);
+      FUN_10000ae70();
+      IVar6 = _objc_msgSend(local_198,PTR_s_componentsSeparatedByString__10009d8f0,&cf__);
+      if ((local_198 == 0) ||
+         (IVar5 = _objc_msgSend((ID)PTR__OBJC_CLASS___WAChatJID_10009cab0,
+                                PTR_s_ifValidWithStringRepresentation__10009d8f8,local_198),
+         IVar5 == 0)) {
+        IVar5 = _objc_msgSend(param_3,PTR_s_senders_10009d7e8);
+        IVar5 = _objc_msgSend(IVar5,PTR_s_lastObject_10009d900);
+        local_198 = _objc_msgSend(IVar5,PTR_s_customIdentifier_10009d908);
+        FUN_10000ae70(0);
+      }
+      else {
+        FUN_10000aff8(0);
+      }
+      uVar8 = FUN_10000aff0(IVar6);
+      uVar4 = uVar8 == 2;
+      if (uVar8 < 2) {
+        if (local_198 == 0) {
+          lVar7 = FUN_10000af40();
+          if (lVar7 != 0) {
+            IVar6 = _objc_msgSend(IVar11,PTR_s_unreadMessagesSinceLastBackgroun_10009d930);
+            auVar15 = FUN_10000af9c();
+            IVar11 = _objc_msgSend(auVar15._0_8_,auVar15._8_8_);
+            (**(code **)(lVar7 + 0x10))(lVar7,IVar6,IVar11);
+          }
+        }
+        else {
+          IVar6 = _objc_msgSend((ID)PTR__OBJC_CLASS___WAChatJID_10009cab0,
+                                PTR_s_ifValidWithStringRepresentation__10009d8f8,local_198);
+          if (IVar6 == 0) {
+            lVar7 = FUN_10000af40();
+            if (lVar7 != 0) {
+              FUN_10000afe8(*(undefined8 *)(lVar7 + 0x10),lVar7,0);
+            }
+          }
+          else {
+            uVar8 = FUN_10000b000(IVar6,PTR_s_attributes_10009d830);
+            lVar7 = FUN_10000af40();
+            if (lVar7 != 0) {
+              IVar6 = _objc_msgSend(IVar11,PTR_s_lastMessagesForJID_unreadOnly_ch_10009d928,IVar6,
+                                    uVar8 >> 1 & 1,1);
+              if (((uint)uVar8 >> 1 & 1) != 0) {
+                auVar15 = FUN_10000af9c(IVar6);
+                IVar6 = _objc_msgSend(auVar15._0_8_,auVar15._8_8_);
+              }
+              FUN_10000af6c(IVar6);
+              FUN_10000afdc(*(undefined8 *)(lVar7 + 0x10),lVar7);
+              if (((uint)uVar8 >> 1 & 1) != 0) {
+                FUN_10000ae80();
+              }
+            }
+          }
+          FUN_10000aee4();
+        }
+      }
+      else {
+        uVar8 = FUN_10000b000(uVar8,PTR_s_attributes_10009d830);
+        IVar5 = _objc_msgSend((ID)PTR__OBJC_CLASS___NSMutableArray_10009ca70,PTR_s_array_10009d910);
+        puVar2 = PTR_s_countByEnumeratingWithState_obje_10009d708;
+        lStack_b8 = 0;
+        local_c0 = 0;
+        uStack_a8 = 0;
+        local_b0 = (long *)0x0;
+        uStack_98 = 0;
+        local_a0 = 0;
+        uStack_88 = 0;
+        uStack_90 = 0;
+        uVar9 = FUN_10000af14(IVar6,PTR_s_countByEnumeratingWithState_obje_10009d708,&local_c0,
+                              &local_140);
+        if (uVar9 != 0) {
+          lVar7 = *local_b0;
+          do {
+            op = PTR_s_ifValidWithStringRepresentation__10009d8f8;
+            puVar3 = PTR_s_addObject__10009d7d0;
+            uVar12 = 0;
+            do {
+              if (*local_b0 != lVar7) {
+                _objc_enumerationMutation(IVar6);
+              }
+              IVar10 = _objc_msgSend((ID)PTR__OBJC_CLASS___WAChatJID_10009cab0,op,
+                                     *(undefined8 *)(lStack_b8 + uVar12 * 8));
+              if (IVar10 != 0) {
+                _objc_msgSend(IVar5,puVar3,IVar10);
+              }
+              FUN_10000ae68();
+              uVar12 = uVar12 + 1;
+              uVar4 = uVar12 == uVar9;
+            } while (uVar12 < uVar9);
+            uVar9 = FUN_10000af14(IVar6,puVar2,&local_c0,&local_140);
+          } while (uVar9 != 0);
+        }
+        FUN_10000af74();
+        lVar7 = FUN_10000af40();
+        if (lVar7 != 0) {
+          IVar6 = _objc_msgSend(IVar11,PTR_s_lastMessagesForJIDArray_unreadOn_10009d918,IVar5,
+                                uVar8 >> 1 & 1);
+          if (((uint)uVar8 >> 1 & 1) != 0) {
+            auVar15 = FUN_10000af9c(IVar6);
+            IVar6 = _objc_msgSend(auVar15._0_8_,auVar15._8_8_);
+          }
+          FUN_10000af6c(IVar6);
+          FUN_10000afdc(*(undefined8 *)(lVar7 + 0x10),lVar7);
+          if (((uint)uVar8 >> 1 & 1) != 0) {
+            FUN_10000ae80();
+          }
+        }
+        FUN_10000ae88();
+      }
+      FUN_10000aed4();
+      FUN_10000af74();
+    }
+    else {
+      IVar6 = _objc_msgSend(IVar11,PTR_s_stashedMessagesWithUniqueKeys__10009d8d8,IVar6);
+      lVar7 = FUN_10000af40();
+      if (lVar7 != 0) {
+        FUN_10000af00();
+        FUN_10000afe8(*(undefined8 *)(lVar7 + 0x10),lVar7,IVar6);
+      }
+    }
+    FUN_10000ae68();
+    FUN_10000ae70();
+  }
+  else {
+    IVar5 = _objc_msgSend((ID)PTR__OBJC_CLASS___UNUserNotificationCenter_10009caa8,
+                          PTR_s_currentNotificationCenter_10009d8a0);
+    local_140 = puVar2;
+    local_138 = uVar1;
+    local_130 = &LAB_10000a820;
+    puStack_128 = &DAT_100097a70;
+    local_120 = IVar6;
+    IStack_118 = param_3;
+    local_110 = IVar11;
+    local_108 = &local_180;
+    _objc_msgSend(IVar5,PTR_s_wa_getDeliveredNotificationsWith_10009d8e0,&local_140);
+    FUN_10000ae70();
+  }
+  FUN_10000ae80(0);
+  FUN_10000af74(0);
+  FUN_10000aebc(0);
+  FUN_10000aee4();
+  FUN_10000ae88();
+  FUN_10000ae90();
+  FUN_10000ae30(local_80);
+  if (!(bool)uVar4) {
+                    /* WARNING: Subroutine does not return */
+    ___stack_chk_fail();
+  }
+  return;
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WASearchForMessageIntentHandler::resolveSendersForSearchForMessages:withCompletion: (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x1000099f0 (GhidraScript)  
+INFO  decomp_intents.java> Size:     564 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_retainBlock replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x20 bytes */
+
+void WASearchForMessageIntentHandler::resolveSendersForSearchForMessages_withCompletion_
+               (ID param_1,SEL param_2,ID param_3,ID param_4,undefined4 param_5)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  undefined *op_00;
+  undefined1 in_ZR;
+  ID IVar2;
+  undefined8 extraout_x8;
+  undefined8 uVar3;
+  undefined1 auVar4 [16];
+  undefined *local_98;
+  undefined8 local_90;
+  undefined1 *local_88;
+  undefined *puStack_80;
+  undefined8 local_78;
+  ID local_70;
+  ID local_68;
+  ID local_60;
+  undefined8 local_58;
+  
+  FUN_10000ae44();
+  local_58 = extraout_x8;
+  FUN_10000af30();
+  FUN_10000aedc();
+  _objc_msgSend(param_1,PTR_s_log_forSearchMessagesIntent__10009d6c8,&cf_resolve_senders,param_3);
+  op_00 = PTR_s_senders_10009d7e8;
+  IVar2 = _objc_msgSend(param_3,PTR_s_senders_10009d7e8);
+  puVar1 = PTR_s_count_10009d740;
+  IVar2 = _objc_msgSend(IVar2,PTR_s_count_10009d740);
+  FUN_10000ae88();
+  if (IVar2 == 0) {
+    if (param_4 == 0) goto LAB_100009bec;
+    local_60 = _objc_msgSend((ID)PTR__OBJC_CLASS___INPersonResolutionResult_10009ca88,
+                             PTR_s_notRequired_10009d7f0);
+    auVar4 = FUN_10000ae54();
+    IVar2 = _objc_msgSend(auVar4._0_8_,auVar4._8_8_,&local_60,1);
+LAB_100009b44:
+    FUN_10000af7c(IVar2);
+    FUN_10000ae68();
+  }
+  else {
+    IVar2 = _objc_msgSend(param_3,op_00);
+    IVar2 = _objc_msgSend(IVar2,puVar1);
+    FUN_10000ae88();
+    op = PTR_s_sharedStorage_10009d6e8;
+    puVar1 = PTR_WAIntentHandler_10009ca60;
+    in_ZR = IVar2 == 2;
+    if (1 < IVar2) {
+      if (param_4 == 0) goto LAB_100009bec;
+      IVar2 = _objc_msgSend(param_3,op_00);
+      IVar2 = _objc_msgSend(IVar2,PTR_s_wa_mapWithBlock__10009d808,
+                            &PTR___NSConcreteGlobalBlock_1000979d0);
+      goto LAB_100009b44;
+    }
+    uVar3 = *(undefined8 *)(param_1 + 0x38);
+    FUN_10000af00();
+    IVar2 = _objc_msgSend((ID)puVar1,op);
+    local_98 = PTR___NSConcreteStackBlock_100094008;
+    local_90 = DAT_100086420;
+    local_88 = &LAB_100009c38;
+    puStack_80 = &DAT_100097950;
+    FUN_10000aedc();
+    local_78 = uVar3;
+    local_68 = param_4;
+    FUN_10000aecc();
+    local_70 = param_3;
+    _objc_msgSend(IVar2,PTR_s_runWhileLoaded__10009d6f8,&local_98);
+    FUN_10000ae80();
+    FUN_10000afbc();
+  }
+  param_4 = 0;
+LAB_100009bec:
+  FUN_10000ae70(param_4);
+  FUN_10000ae90();
+  FUN_10000ae78();
+  FUN_10000ae30(local_58);
+  if ((bool)in_ZR) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail();
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WASearchForMessageIntentHandler::resolveDateTimeRangeForSearchForMessages:withCompletion: (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x100009e8c (GhidraScript)  
+INFO  decomp_intents.java> Size:     340 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_retainBlock replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x20 bytes */
+
+void WASearchForMessageIntentHandler::resolveDateTimeRangeForSearchForMessages_withCompletion_
+               (ID param_1,SEL param_2,ID param_3,ID param_4,undefined4 param_5)
+
+{
+  undefined *op;
+  undefined1 in_ZR;
+  ID IVar1;
+  undefined8 extraout_x8;
+  undefined **ppuVar2;
+  undefined1 auVar3 [16];
+  undefined1 auStack_40 [8];
+  undefined8 local_38;
+  
+  FUN_10000ae44();
+  op = PTR_s_log_forSearchMessagesIntent__10009d6c8;
+  local_38 = extraout_x8;
+  FUN_10000b010();
+  FUN_10000af00();
+  _objc_msgSend(param_1,op,&cf_resolve_date,param_3);
+  IVar1 = _objc_msgSend(param_3,PTR_s_dateTimeRange_10009d828);
+  FUN_10000ae70();
+  FUN_10000ae80();
+  if (IVar1 == 0) {
+    auVar3 = FUN_100009fe0(auStack_40,*(undefined4 *)(param_1 + 8));
+    FUN_10000ae98(auVar3._0_8_,auVar3._8_8_,auStack_40,
+                  "intent-search//resolve-date/result [%d] [not required]");
+    FUN_10000ae78();
+    if (param_4 == 0) goto LAB_100009fb8;
+    ppuVar2 = &PTR_s_notRequired_10009d7f0;
+  }
+  else {
+    auVar3 = FUN_100009fe0(auStack_40,*(undefined4 *)(param_1 + 8));
+    FUN_10000ae98(auVar3._0_8_,auVar3._8_8_,auStack_40,
+                  "intent-search//resolve-date/result [%d] [unsupported]");
+    FUN_10000ae78();
+    if (param_4 == 0) goto LAB_100009fb8;
+    ppuVar2 = &PTR_s_unsupported_10009d800;
+  }
+  IVar1 = _objc_msgSend((ID)PTR__OBJC_CLASS___INDateComponentsRangeResolutionResult_10009ca98,
+                        *ppuVar2);
+  (**(code **)(param_4 + 0x10))(param_4,IVar1);
+  FUN_10000ae78();
+LAB_100009fb8:
+  FUN_10000ae90();
+  FUN_10000ae30(local_38);
+  if ((bool)in_ZR) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail();
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WASendMessageIntentHandler::handleSendMessage:completion: (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x10000b1fc (GhidraScript)  
+INFO  decomp_intents.java> Size:     396 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainBlock replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x20 bytes */
+
+void WASendMessageIntentHandler::handleSendMessage_completion_
+               (ID param_1,SEL param_2,ID param_3,ID param_4,undefined4 param_5)
+
+{
+  undefined *puVar1;
+  undefined *self;
+  undefined *op;
+  undefined1 in_ZR;
+  ID IVar2;
+  undefined8 uVar3;
+  undefined8 extraout_x8;
+  code *extraout_x8_00;
+  undefined8 uVar4;
+  undefined *local_d8;
+  undefined8 local_d0;
+  undefined1 *local_c8;
+  undefined *puStack_c0;
+  undefined8 local_b8;
+  ID local_b0;
+  ID IStack_a8;
+  undefined **local_a0;
+  undefined *local_98;
+  undefined8 local_90;
+  code *local_88;
+  undefined *puStack_80;
+  ID local_78;
+  ID local_70;
+  undefined8 local_68;
+  
+  FUN_10000cc30();
+  local_68 = extraout_x8;
+  FUN_10000cc9c();
+  FUN_10000ccd4();
+  puVar1 = PTR___NSConcreteStackBlock_100094008;
+  uVar3 = DAT_100086420;
+  local_98 = PTR___NSConcreteStackBlock_100094008;
+  local_90 = DAT_100086420;
+  local_88 = FUN_10000b388;
+  puStack_80 = &DAT_100097b30;
+  local_78 = param_1;
+  local_70 = param_4;
+  IVar2 = _objc_msgSend(DAT_1000af1c8,PTR_s_attemptRequest_10009da00);
+  op = PTR_s_sharedStorage_10009da10;
+  self = PTR_WAIntentHandler_10009cae0;
+  if ((IVar2 & 1) == 0) {
+    IVar2 = FUN_10000cc54();
+    IVar2 = _objc_msgSend(IVar2,PTR_s_initWithCode_userActivity__10009da08,5,0);
+    uVar3 = FUN_10000cddc();
+    (*extraout_x8_00)(uVar3,IVar2);
+  }
+  else {
+    uVar4 = *(undefined8 *)(param_1 + 0x38);
+    FUN_10000cdac();
+    IVar2 = _objc_msgSend((ID)self,op);
+    local_d8 = puVar1;
+    local_d0 = uVar3;
+    local_c8 = &LAB_10000b480;
+    puStack_c0 = &DAT_100097c00;
+    FUN_10000cccc();
+    local_b8 = uVar4;
+    local_a0 = &local_98;
+    FUN_10000cca4();
+    local_b0 = param_3;
+    IStack_a8 = param_1;
+    _objc_msgSend(IVar2,PTR_s_runWhileLoaded__10009da58,&local_d8);
+    FUN_10000cc94();
+    FUN_10000cd28();
+    FUN_10000cd48();
+  }
+  FUN_10000ccac();
+  FUN_10000cc8c();
+  FUN_10000cc7c(0);
+  FUN_10000cc60();
+  FUN_10000cc1c(local_68);
+  if ((bool)in_ZR) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail();
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> ============================================================ (GhidraScript)  
+INFO  decomp_intents.java> FUNCTION: WASendMessageIntentHandler::resolveRecipientsForSendMessage:completion: (GhidraScript)  
+INFO  decomp_intents.java> Entry:    0x10000c6fc (GhidraScript)  
+INFO  decomp_intents.java> Size:     252 bytes (GhidraScript)  
+INFO  decomp_intents.java> ------------------------------------------------------------ (GhidraScript)  
+INFO  decomp_intents.java> 
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* Function Stack Size: 0x20 bytes */
+
+void WASendMessageIntentHandler::resolveRecipientsForSendMessage_completion_
+               (ID param_1,SEL param_2,ID param_3,ID param_4,undefined4 param_5)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  undefined1 in_ZR;
+  ID self;
+  undefined8 extraout_x8;
+  undefined8 uVar2;
+  undefined8 uVar3;
+  undefined1 auStack_88 [8];
+  undefined8 local_80;
+  undefined1 *local_78;
+  undefined *puStack_70;
+  ID local_68;
+  undefined8 uStack_60;
+  undefined8 local_58;
+  ID IStack_50;
+  undefined8 local_48;
+  
+  FUN_10000cc30();
+  local_48 = extraout_x8;
+  FUN_10000cc9c();
+  FUN_10000cca4();
+  op = PTR_s_sharedStorage_10009da10;
+  puVar1 = PTR_WAIntentHandler_10009cae0;
+  uVar2 = *(undefined8 *)(param_1 + 0x38);
+  uVar3 = *(undefined8 *)(param_1 + 0x10);
+  FUN_10000cd20();
+  FUN_10000cccc();
+  self = _objc_msgSend((ID)puVar1,op);
+  FUN_10000ccbc();
+  puVar1 = PTR_s_runWhileLoaded__10009da58;
+  local_80 = DAT_100086420;
+  local_78 = &LAB_10000c7f8;
+  puStack_70 = &DAT_100097c00;
+  local_68 = param_3;
+  uStack_60 = uVar2;
+  local_58 = uVar3;
+  IStack_50 = param_4;
+  FUN_10000ccd4();
+  FUN_10000cca4();
+  _objc_msgSend(self,puVar1,auStack_88);
+  FUN_10000ccac();
+  FUN_10000cd18();
+  FUN_10000cd48();
+  FUN_10000cc84();
+  FUN_10000cc8c();
+  FUN_10000cc7c();
+  FUN_10000cc60();
+  FUN_10000cc1c(local_48);
+  if ((bool)in_ZR) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail();
+}
+
+ (GhidraScript)  
+INFO  decomp_intents.java>  (GhidraScript)  
+INFO  decomp_intents.java> >>> NOT FOUND: INSearchForMessagesIntentResponse (GhidraScript)  
+INFO  decomp_intents.java> >>> NOT FOUND: INSendMessageIntentResponse (GhidraScript)  
+INFO  decomp_intents.java> >>> NOT FOUND: initWithCode_userActivity_ (GhidraScript)  
+INFO  decomp_intents.java> >>> NOT FOUND: ContinueInApp (GhidraScript)  
+INFO  decomp_intents.java> >>> NOT FOUND: intentSendMessage (GhidraScript)  
+INFO  decomp_intents.java> ############# DONE #############  total=9 (GhidraScript)  
+INFO  ANALYZING changes made by post scripts: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  REPORT: Post-analysis succeeded for file: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  /Intents: file created (aaryanshsahay) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /Intents (intents_proj:/Intents) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  

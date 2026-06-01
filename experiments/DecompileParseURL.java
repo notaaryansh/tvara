@@ -71,8 +71,37 @@ public class DecompileParseURL extends GhidraScript {
         "allDeepLinkTypes",
         "deepLinkWithURL",
         "deepLinkClassTypesWithContext",
-        "canOpenDeepLinkWithURL"
+        "canOpenDeepLinkWithURL",
+        // Round 6 — the message-jump UI handlers + NSUserActivity entry point
+        "jumpToQuotedMessage",
+        "jumpToQuotedChatSession",
+        "highlightMessageTemporarily",
+        "scrollToAndHighlightRow",
+        "didTapQuotedItemWithReplyContext",
+        "didRequestScrollToQuotedMessage",
+        "continueUserActivity",
+        "INSearchForMessages",
+        // Round 7 — the CoreSpotlight entry point (the REAL doorway)
+        "continueSpotlightUserActivityWith",
+        "CSSearchableItem",
+        "indexableItemForMessage",
+        "searchableItemForMessage",
+        "uniqueIdentifierForMessage",
+        "indexMessage",
+        // Round 8 — the message lookup + navigation API surface
+        "fetchMessageWithMessageID",
+        "fetchMessageWithStanzaID",
+        "messageWithMessageID",
+        "showMessage:",
+        "setTargetMessage",
+        "setFocusedMessage",
+        "navigateToMessage"
     };
+
+    // Address-based targets (Round 8 additions for methods without unique name match)
+    // 0x105ce1d7c — showMessage: (method 180 — big VC class)
+    // 0x103ccdbb0 — setTargetMessage:
+    // 0x105049130, 0x105805790, 0x10506b240, 0x105071d2c — bubbleTableViewCell:didRequestScrollToQuotedMessage: impls
 
     // Round 4 — Swift-side registry helpers (no symbols, decompile by VA)
     private static final long[] EXPLICIT_ADDRESSES = {
@@ -85,7 +114,16 @@ public class DecompileParseURL extends GhidraScript {
         0x1055d2f58L, // +[WAChatPresenter forContact:userContext:]
         0x1055d2ec4L, // +[WAChatPresenter forChatSession:]
         0x101dce7dcL, // -[? chatPresenterForIdentifier:] — string-id constructor
-        0x1055d46f8L  // -[WAChatPresenter messageToScrollTo] — getter
+        0x1055d46f8L, // -[WAChatPresenter messageToScrollTo] — getter
+        // Round 8 — direct addresses
+        0x105ce1d7cL, // showMessage: (method 180 — big VC class)
+        0x103ccdbb0L, // setTargetMessage:
+        0x105049130L, // bubbleTableViewCell:didRequestScrollToQuotedMessage: impl A
+        0x105805790L, // bubbleTableViewCell:didRequestScrollToQuotedMessage: impl B
+        0x10506b240L, // bubbleTableViewCell:didRequestScrollToQuotedMessage: impl C
+        0x105071d2cL, // bubbleTableViewCell:didRequestScrollToQuotedMessage: impl D
+        0x1009c7c08L, // Payments.WAPaymentManager fetchMessageWithMessageID:
+        0x1015a530cL  // WAHistorySync.HistorySyncCompanionStorageImpl fetchMessageWithMessageID:
     };
 
     @Override

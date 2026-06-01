@@ -1,0 +1,224 @@
+openjdk version "21.0.11" 2026-04-21
+OpenJDK Runtime Environment Homebrew (build 21.0.11)
+OpenJDK 64-Bit Server VM Homebrew (build 21.0.11, mixed mode)
+INFO  Using log config file: jar:file:/opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Framework/Generic/lib/Generic.jar!/generic.log4j.xml (LoggingInitialization)  
+INFO  Using log file: /Users/aaryanshsahay/Library/ghidra/ghidra_12.1.1_PUBLIC/application.log (LoggingInitialization)  
+INFO  Loading user preferences: /Users/aaryanshsahay/Library/ghidra/ghidra_12.1.1_PUBLIC/preferences (Preferences)  
+INFO  Searching for classes... (ClassSearcher)  
+INFO  Class search complete (479 ms) (ClassSearcher)  
+INFO  Initializing SSL Context (DefaultSSLContextInitializer)  
+INFO  Initializing Random Number Generator... (SecureRandomFactory)  
+INFO  Random Number Generator initialization complete: NativePRNGNonBlocking (SecureRandomFactory)  
+INFO  Trust manager disabled, cacerts have not been set (DefaultTrustManagerFactory)  
+INFO  Headless startup complete (1165 ms) (AnalyzeHeadless)  
+INFO  Class searcher loaded 59 extension points (20 false positives) (ClassSearcher)  
+INFO  HEADLESS Script Paths:
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/DecompilerDependent/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/Atmel/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/DATA/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/PDB/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/VersionTracking/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/Base/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/MicrosoftCodeAnalyzer/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/SystemEmulation/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/Decompiler/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/FunctionID/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/FileFormats/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/8051/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Debug/Debugger-rmi-trace/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/BSim/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Debug/Debugger/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/JVM/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/WildcardAssembler/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/GnuDemangler/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Processors/PIC/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/PyGhidra/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/SwiftDemangler/ghidra_scripts
+    /opt/homebrew/Cellar/ghidra/12.1.1/libexec/Ghidra/Features/BytePatterns/ghidra_scripts (HeadlessAnalyzer)  
+INFO  HEADLESS: execution starts (HeadlessAnalyzer)  
+INFO  Creating project: /tmp/ghidra_intents/intents_proj (HeadlessAnalyzer)  
+INFO  Creating project: /tmp/ghidra_intents/intents_proj (DefaultProject)  
+INFO  REPORT: Processing input files:  (HeadlessAnalyzer)  
+INFO       project: /tmp/ghidra_intents/intents_proj (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  Using Loader: Mac OS X Mach-O (ProgramLoader)  
+INFO  Using Language/Compiler: x86:LE:64:default:swift (ProgramLoader)  
+INFO  Using Library Search Path: [., /System/Library/dyld/dyld_shared_cache_arm64e, /System/Library/dyld/dyld_shared_cache_x86_64, /System/Library/dyld/dyld_shared_cache_x86_64h, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_arm64e, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_x86_64, /System/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_x86_64h, /Users/aaryanshsahay/Library/Java/Extensions, /Library/Java/Extensions, /Network/Library/Java/Extensions, /System/Library/Java/Extensions, /usr/lib/java] (ProgramLoader)  
+INFO  Additional info:
+Loading file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents?MD5=12d9f1b5a8c1be20843ce24a8ea1c838...
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+WARNING: Problem fixing up symbol '__swift_FORCE_LOAD_$_swiftUIKit' - Library ordinal '40' outside of expected range
+SymbolTableCommand> Failed to markup: LC_SYMTAB (symbols) - Intents
+------------------------------------------------
+
+Linking the External Programs of 'Intents' to imported libraries...
+  [/usr/lib/libobjc.A.dylib] -> not found in project
+  [/usr/lib/libc++.1.dylib] -> not found in project
+  [@rpath/SharedModules.framework/Versions/A/SharedModules] -> not found in project
+  [@rpath/WAAppKitBridge.framework/Versions/A/WAAppKitBridge] -> not found in project
+  [/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation] -> not found in project
+  [/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation] -> not found in project
+  [/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation] -> not found in project
+  [/System/Library/Frameworks/AVFAudio.framework/Versions/A/AVFAudio] -> not found in project
+  [/System/Library/Frameworks/CoreData.framework/Versions/A/CoreData] -> not found in project
+  [/System/iOSSupport/System/Library/Frameworks/UIKit.framework/Versions/A/UIKit] -> not found in project
+  [/usr/lib/libsqlite3.dylib] -> not found in project
+  [/usr/lib/libSystem.B.dylib] -> not found in project
+  [/usr/lib/swift/libswift_Concurrency.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCore.dylib] -> not found in project
+  [/usr/lib/swift/libswiftDarwin.dylib] -> not found in project
+  [/usr/lib/swift/libswiftObjectiveC.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreFoundation.dylib] -> not found in project
+  [/usr/lib/swift/libswiftDispatch.dylib] -> not found in project
+  [/usr/lib/swift/libswiftXPC.dylib] -> not found in project
+  [/usr/lib/swift/libswiftIOKit.dylib] -> not found in project
+  [/usr/lib/swift/libswiftQuartzCore.dylib] -> not found in project
+  [/usr/lib/swift/libswiftMetal.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreImage.dylib] -> not found in project
+  [/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib] -> not found in project
+  [/usr/lib/swift/libswiftOSLog.dylib] -> not found in project
+  [/usr/lib/swift/libswiftos.dylib] -> not found in project
+  [/System/Library/Frameworks/UserNotifications.framework/Versions/A/UserNotifications] -> not found in project
+  [/usr/lib/swift/libswiftCoreLocation.dylib] -> not found in project
+  [/usr/lib/swift/libswiftAccelerate.dylib] -> not found in project
+  [/usr/lib/swift/libswiftsimd.dylib] -> not found in project
+  [/usr/lib/swift/libswiftSpatial.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCompression.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreMedia.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreAudio.dylib] -> not found in project
+  [/usr/lib/swift/libswiftAVFoundation.dylib] -> not found in project
+  [/usr/lib/swift/libswiftCoreMIDI.dylib] -> not found in project
+  [/usr/lib/swift/libswiftIntents.dylib] -> not found in project
+  [/usr/lib/swift/libswiftFoundation.dylib] -> not found in project
+  [/System/iOSSupport/usr/lib/swift/libswiftUIKit.dylib] -> not found in project
+------------------------------------------------
+
+ (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  hit non-returning function, restarting decompiler switch analyzer later (DecompilerSwitchAnalyzer)  
+ERROR Unexpected exception getting Decompiler result (InternalResultListener) java.util.concurrent.ExecutionException: java.lang.ArrayIndexOutOfBoundsException: Index 2 out of bounds for length 2
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:191)
+	at generic.concurrent.QResult.<init>(QResult.java:40)
+	at generic.concurrent.FutureTaskMonitor.run(FutureTaskMonitor.java:77)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: java.lang.ArrayIndexOutOfBoundsException: Index 2 out of bounds for length 2
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer.findMessages(ObjcMessageAnalyzer.java:325)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer.fixMsgSendCalls(ObjcMessageAnalyzer.java:370)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer$1.process(ObjcMessageAnalyzer.java:148)
+	at ghidra.app.plugin.core.analysis.ObjcMessageAnalyzer$1.process(ObjcMessageAnalyzer.java:145)
+	at ghidra.app.decompiler.parallel.DecompilerCallback.process(DecompilerCallback.java:80)
+	at ghidra.app.decompiler.parallel.DecompilerCallback.process(DecompilerCallback.java:41)
+	at generic.concurrent.ConcurrentQ$CallbackCallable.call(ConcurrentQ.java:706)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at generic.concurrent.FutureTaskMonitor.run(FutureTaskMonitor.java:75)
+	... 3 more
+ 
+INFO  Packed database cache: /var/tmp/aaryanshsahay-ghidra/packed-db-cache (PackedDatabaseCache)  
+INFO  Applied data type archive: mac_osx (ApplyDataArchiveAnalyzer)  
+WARN  Decompiling 10005f3ed: Unable to read bytes at ram:e58f3d69 (DecompileCallback)  
+WARN  Decompiling 10005f3ed: Unable to read bytes at ram:e58f3d69 (DecompileCallback)  
+WARN  Decompiling 10002360b: Unable to read bytes at ram:e58b7f41 (DecompileCallback)  
+WARN  Decompiling 10001ebc1: Unable to read bytes at ram:e58b351d (DecompileCallback)  
+WARN  Decompiling 100023724: Unable to read bytes at ram:e58b8219 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 100023947: Unable to resolve constructor at 100023947 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 100023928: Unable to resolve constructor at 100023928 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 10002390a: Unable to resolve constructor at 10002390a (DecompileCallback)  
+WARN  Decompiling 100023724: Unable to read bytes at ram:e58b8219 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 100023947: Unable to resolve constructor at 100023947 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 100023928: Unable to resolve constructor at 100023928 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 10002390a: Unable to resolve constructor at 10002390a (DecompileCallback)  
+WARN  Decompiling 10001ebc1: Unable to read bytes at ram:e58b351d (DecompileCallback)  
+WARN  Decompiling 10002360b: Unable to read bytes at ram:e58b7f41 (DecompileCallback)  
+WARN  Decompiling 100023724: Unable to read bytes at ram:e58b8219 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 100023947: Unable to resolve constructor at 100023947 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 100023928: Unable to resolve constructor at 100023928 (DecompileCallback)  
+WARN  Decompiling 100023724, pcode error at 10002390a: Unable to resolve constructor at 10002390a (DecompileCallback)  
+INFO  -----------------------------------------------------
+    ASCII Strings                              0.219 secs
+    Apply Data Archives                        0.156 secs
+    CFStrings                                  0.008 secs
+    Call Convention ID                         2.885 secs
+    Call-Fixup Installer                       0.011 secs
+    Create Address Tables                      0.062 secs
+    Create Address Tables - One Time           0.237 secs
+    Create Function                            0.044 secs
+    Data Reference                             0.210 secs
+    Decompiler Switch Analysis                29.274 secs
+    Decompiler Switch Analysis - One Time      2.524 secs
+    Demangler GNU                              0.187 secs
+    Demangler Swift                           13.548 secs
+    Disassemble Entry Points                   0.048 secs
+    Embedded Media                             0.020 secs
+    External Entry References                  0.000 secs
+    Function ID                                0.157 secs
+    Mach-O Function Starts                     0.022 secs
+    Non-Returning Functions - Discovered       0.108 secs
+    Non-Returning Functions - Known            0.004 secs
+    Objective-C Message Analyzer              55.857 secs
+    Objective-C Type Metadata Analyzer         0.657 secs
+    Reference                                  0.234 secs
+    Scalar Operand References                  0.177 secs
+    Shared Return Calls                        0.112 secs
+    Stack                                      0.464 secs
+    Subroutine References                      0.394 secs
+    Subroutine References - One Time           0.003 secs
+    Swift Type Metadata Analyzer               0.130 secs
+    x86 Constant Reference Analyzer            0.964 secs
+-----------------------------------------------------
+     Total Time   108 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  REPORT: Execute script: /tmp/decomp_intents.java  (HeadlessAnalyzer)  
+ERROR Failed to find script in any script directory: /private/tmp/decomp_intents.java (GhidraScriptUtil)  
+ERROR REPORT SCRIPT ERROR: /tmp/decomp_intents.java : The class could not be found. It must be the public class of the .java file: Failed to find source bundle containing script: /private/tmp/decomp_intents.java (HeadlessAnalyzer) ghidra.app.script.GhidraScriptLoadException: The class could not be found. It must be the public class of the .java file: Failed to find source bundle containing script: /private/tmp/decomp_intents.java
+	at ghidra.app.script.JavaScriptProvider.getScriptInstance(JavaScriptProvider.java:114)
+	at ghidra.app.util.headless.HeadlessAnalyzer.runScriptsList(HeadlessAnalyzer.java:927)
+	at ghidra.app.util.headless.HeadlessAnalyzer.analyzeProgram(HeadlessAnalyzer.java:1097)
+	at ghidra.app.util.headless.HeadlessAnalyzer.processFileWithImport(HeadlessAnalyzer.java:1595)
+	at ghidra.app.util.headless.HeadlessAnalyzer.processWithLoader(HeadlessAnalyzer.java:1755)
+	at ghidra.app.util.headless.HeadlessAnalyzer.processWithImport(HeadlessAnalyzer.java:1696)
+	at ghidra.app.util.headless.HeadlessAnalyzer.processWithImport(HeadlessAnalyzer.java:1780)
+	at ghidra.app.util.headless.HeadlessAnalyzer.processLocal(HeadlessAnalyzer.java:464)
+	at ghidra.app.util.headless.AnalyzeHeadless.launch(AnalyzeHeadless.java:199)
+	at ghidra.GhidraLauncher.launch(GhidraLauncher.java:81)
+	at ghidra.Ghidra.main(Ghidra.java:54)
+Caused by: java.lang.ClassNotFoundException: Failed to find source bundle containing script: /private/tmp/decomp_intents.java
+	at ghidra.app.script.JavaScriptProvider.loadClass(JavaScriptProvider.java:155)
+	at ghidra.app.script.JavaScriptProvider.getScriptInstance(JavaScriptProvider.java:97)
+	... 10 more
+ 
+INFO  ANALYZING changes made by post scripts: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  REPORT: Post-analysis succeeded for file: file:///Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents (HeadlessAnalyzer)  
+INFO  /Intents: file created (aaryanshsahay) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /Intents (intents_proj:/Intents) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
