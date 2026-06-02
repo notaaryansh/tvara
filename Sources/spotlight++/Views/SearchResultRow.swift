@@ -96,20 +96,35 @@ struct SearchResultRow: View {
             } else if isMail {
                 messageAvatar(platformBadge: Self.mailBadgeIcon)
             } else if let data = result.iconData, let img = NSImage(data: data) {
-                Image(nsImage: img)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 28, height: 28)
-                    .padding(4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
-                    )
-                    .frame(width: 36, height: 36)
+                // System Settings rows ship a real macOS app icon
+                // (gradient + symbol baked in). Render it full-bleed at
+                // 36x36 without the favicon bubble — adding the bubble
+                // around an already-finished app icon looks like an
+                // icon-inside-an-icon.
+                if result.source == .settings {
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 36, height: 36)
+                } else {
+                    // Browser favicons are tiny 16-32px PNGs typically
+                    // designed to sit on a colored chrome — the soft
+                    // bubble + thin border gives them weight.
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 28, height: 28)
+                        .padding(4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color.white.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                        )
+                        .frame(width: 36, height: 36)
+                }
             } else {
                 tintedBadge
             }

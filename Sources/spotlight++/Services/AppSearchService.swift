@@ -51,6 +51,46 @@ actor AppSearchService {
             scored.append((app, rank))
         }
 
+        // Fuzzy fallback for typos like "spottify" → Spotify, "noton" →
+        // Notion. Only fires when prefix / word-prefix / contains all
+        // returned zero — so it doesn't fight cleanly-typed queries.
+        // Same per-character Levenshtein + length-based budget as the
+        // command services use.
+        if scored.isEmpty {
+            let budget = FuzzyMatch.budget(for: q)
+            if budget > 0 {
+                var fuzzy: [(AppEntry, Int)] = []
+                for app in cache {
+                    let nameLower = app.name.lowercased()
+                    if let dist = FuzzyMatch.levenshtein(
+                        q, nameLower, budget: budget
+                    ) {
+                        fuzzy.append((app, dist))
+                    }
+                }
+                // Closest typos first; tie-break by name alphabetical.
+                fuzzy.sort { a, b in
+                    if a.1 != b.1 { return a.1 < b.1 }
+                    return a.0.name.localizedCaseInsensitiveCompare(b.0.name) == .orderedAscending
+                }
+                return fuzzy.prefix(limit).map { (app, _) in
+                    SearchResult(
+                        title: app.name,
+                        subtitle: abbreviate(app.path),
+                        source: .app,
+                        date: nil,
+                        badge: nil,
+                        openTarget: .file(app.path),
+                        // Below the exact-name band (1500) but well above
+                        // any prior contact-pin or content rank — fuzzy
+                        // apps still want to dominate when they're the
+                        // only thing that matched.
+                        rank: 1400
+                    )
+                }
+            }
+        }
+
         scored.sort { a, b in
             if a.1 != b.1 { return a.1 > b.1 }
             return a.0.name.localizedCaseInsensitiveCompare(b.0.name) == .orderedAscending

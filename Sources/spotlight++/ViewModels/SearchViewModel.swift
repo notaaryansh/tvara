@@ -144,9 +144,15 @@ final class SearchViewModel: ObservableObject {
         self.smartService = smartService
         self.embeddingStore = embeddingStore
 
+        // v0 fires performSearch on EVERY keystroke — no debounce. The
+        // command sources are sync alias-table loops (~5 µs each), so
+        // debouncing was pure perceived latency with zero throughput
+        // benefit. When content search is re-enabled, the right shape
+        // is to split this into two pipelines: an immediate one for
+        // commands and a debounced one (150-250 ms) for the API-heavy
+        // content fan-out. For now we just want it instant.
         $query
             .removeDuplicates()
-            .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
             .sink { [weak self] q in self?.performSearch(q) }
             .store(in: &cancellables)
 

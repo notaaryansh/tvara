@@ -57,8 +57,36 @@ struct SearchView: View {
                 .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
         )
         .padding(.top, 4)
-        .animation(.easeOut(duration: 0.15), value: viewModel.results.count)
-        .animation(.easeOut(duration: 0.12), value: viewModel.activeTab)
+        // Single binary mode token drives the bubble's resize. Each
+        // discrete mode (no query, results-pending, results-shown,
+        // acting, composing) maps to a stable visual shape, so the
+        // animation fires exactly ONCE on mode change instead of
+        // restarting on every individual count tick as results stream
+        // in from per-source async tasks.
+        //
+        // Spring with zero overshoot — the user explicitly wants this
+        // to feel snappy, not bouncy. `extraBounce: 0` keeps it crisp.
+        .animation(.snappy(duration: 0.18, extraBounce: 0), value: bubbleMode)
+    }
+
+    /// Discrete UI mode the bubble can be in. Collapses all the
+    /// intermediate "got 1 result, now 2, now 3" transitions into a
+    /// single "results-shown" mode so the spring fires once per real
+    /// shape change, not once per source completing.
+    private enum BubbleMode: String, Hashable {
+        case empty            // no query typed
+        case pending          // query typed, no results yet
+        case results          // results visible
+        case acting           // acting mode footer
+        case composing        // compose panel
+    }
+
+    private var bubbleMode: BubbleMode {
+        if viewModel.composeState != nil { return .composing }
+        if viewModel.actingOn != nil     { return .acting }
+        if !hasQuery                     { return .empty }
+        if viewModel.results.isEmpty     { return .pending }
+        return .results
     }
 
     private var hasQuery: Bool {

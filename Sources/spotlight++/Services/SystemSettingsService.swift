@@ -252,10 +252,28 @@ final class SystemSettingsService {
                 date: nil,
                 badge: nil,
                 openTarget: .url("x-apple.systempreferences:\(entry.paneID)"),
-                rank: rankBase - idx
+                rank: rankBase - idx,
+                iconData: Self.settingsAppIconData
             )
         }
     }
+
+    /// PNG bytes of the System Settings.app icon, computed once at
+    /// class-load and cached. Passed through every row's `iconData` so
+    /// SearchResultRow's existing `.url` branch picks up the real app
+    /// icon instead of falling back to the SF Symbol gear.
+    private static let settingsAppIconData: Data? = {
+        let icon = NSWorkspace.shared.icon(
+            forFile: "/System/Applications/System Settings.app"
+        )
+        icon.size = NSSize(width: 64, height: 64)
+        guard let tiff = icon.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        return png
+    }()
 
     /// True when the typed query equals one of our aliases exactly. Used
     /// by the ViewModel's exclusivity rule.
