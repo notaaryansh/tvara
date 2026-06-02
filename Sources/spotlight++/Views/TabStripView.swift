@@ -1,19 +1,25 @@
 import SwiftUI
 
 struct TabStripView: View {
-    @Binding var activeTab: SearchTab
-    let count: (SearchTab) -> Int
+    /// Observing the ViewModel directly (vs taking a closure parameter)
+    /// is intentional. SwiftUI can't diff closures, so a previous design
+    /// that passed `count: (SearchTab) -> Int` left the pill badges
+    /// stale — they only refreshed when activeTab changed because the
+    /// binding was the only observable input. With @ObservedObject,
+    /// SwiftUI re-renders this view on every @Published change in the
+    /// ViewModel, so counts always match what allMerged() returns.
+    @ObservedObject var viewModel: SearchViewModel
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(SearchTab.allCases, id: \.self) { tab in
                 TabPill(
                     label: tab.label,
-                    count: count(tab),
-                    isSelected: tab == activeTab
+                    count: viewModel.count(for: tab),
+                    isSelected: tab == viewModel.activeTab
                 )
                 .contentShape(Capsule())
-                .onTapGesture { activeTab = tab }
+                .onTapGesture { viewModel.activeTab = tab }
             }
             Spacer()
             Text("⇥ to switch")

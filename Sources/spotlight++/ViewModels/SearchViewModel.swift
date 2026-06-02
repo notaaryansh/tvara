@@ -247,9 +247,18 @@ final class SearchViewModel: ObservableObject {
 
     // MARK: - Search
 
+    /// Minimum query length before ANY source runs. Single-letter queries
+    /// like `s` returned 30+ matches across apps/settings/files — visual
+    /// noise the user can't realistically pick from. Forcing 3 characters
+    /// before matching trades a 2-keystroke delay for a focused list.
+    private static let minimumQueryLength = 3
+
     private func performSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else {
+        // Treat anything below the minimum length the same as empty —
+        // clears everything and shows the empty state. Avoids the
+        // "typed `s`, got 30 things" problem.
+        guard trimmed.count >= Self.minimumQueryLength else {
             browserResults = []; fileResults = []; appResults = []
             whatsappResults = []; discordResults = []
             imessageResults = []; mailResults = []; notesResults = []

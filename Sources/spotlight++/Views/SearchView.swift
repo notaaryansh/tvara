@@ -35,7 +35,7 @@ struct SearchView: View {
                 actingFooter
             } else if hasQuery {
                 Divider().opacity(0.25)
-                TabStripView(activeTab: $viewModel.activeTab, count: viewModel.count(for:))
+                TabStripView(viewModel: viewModel)
                 if viewModel.isAIThinking || viewModel.aiExplanation != nil {
                     aiBanner
                 }
