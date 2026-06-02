@@ -59,6 +59,7 @@ actor FileSearchService {
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map(String.init)
             .filter { $0.hasPrefix(scopePrefix) }
+            .filter { !Self.isJunkPath($0) }
             .prefix(limit * 4)               // we'll filter junk before truncating
 
         let now = Date()
@@ -139,5 +140,43 @@ actor FileSearchService {
             return "~" + path.dropFirst(home.count)
         }
         return path
+    }
+
+    /// Paths that pass mdfind's name match but are noise for a launcher
+    /// — dependency caches, build artifacts, hidden folders. Filtering
+    /// here keeps "chrome" from surfacing four node_modules/chrome
+    /// folders above the actual Google Chrome.app.
+    nonisolated private static func isJunkPath(_ path: String) -> Bool {
+        // Dependency manager + build artifact caches.
+        let junkSegments = [
+            "/node_modules/",
+            "/.venv/",
+            "/venv/",
+            "/.git/",
+            "/__pycache__/",
+            "/.next/",
+            "/.nuxt/",
+            "/.svelte-kit/",
+            "/dist/",
+            "/build/",
+            "/.build/",
+            "/DerivedData/",
+            "/Pods/",
+            "/.gradle/",
+            "/.cache/",
+            "/Caches/",
+        ]
+        for segment in junkSegments where path.range(of: segment) != nil {
+            return true
+        }
+        // ~/Library is full of internal app caches; user almost never
+        // wants to navigate there from a launcher.
+        let home = NSHomeDirectory()
+        if path.hasPrefix("\(home)/Library/") { return true }
+        // Any path component starting with `.` (dotfolders / dotfiles).
+        for component in path.split(separator: "/") {
+            if component.hasPrefix(".") && component.count > 1 { return true }
+        }
+        return false
     }
 }

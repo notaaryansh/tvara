@@ -89,8 +89,14 @@ struct SearchView: View {
         return .results
     }
 
+    /// True only when the user has typed enough characters for the
+    /// ViewModel to actually run any source. Drives whether the bubble
+    /// expands to show tabs + results below the input — for queries
+    /// under the minimum length we keep the panel as a bare search bar,
+    /// no pill strip, no empty state, no visual noise.
     private var hasQuery: Bool {
-        !viewModel.query.trimmingCharacters(in: .whitespaces).isEmpty
+        viewModel.query.trimmingCharacters(in: .whitespaces).count
+            >= SearchViewModel.minimumQueryLengthForUI
     }
 
     private var searchBar: some View {

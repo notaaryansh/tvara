@@ -251,7 +251,11 @@ final class SearchViewModel: ObservableObject {
     /// like `s` returned 30+ matches across apps/settings/files — visual
     /// noise the user can't realistically pick from. Forcing 3 characters
     /// before matching trades a 2-keystroke delay for a focused list.
-    private static let minimumQueryLength = 3
+    /// Exposed publicly so SearchView can also gate UI chrome (tab strip,
+    /// results area) on the same threshold and not just live-update
+    /// state silently.
+    static let minimumQueryLengthForUI = 3
+    private static var minimumQueryLength: Int { minimumQueryLengthForUI }
 
     private func performSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)

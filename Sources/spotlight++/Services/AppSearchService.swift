@@ -38,15 +38,20 @@ actor AppSearchService {
         for app in cache {
             let nameLower = app.name.lowercased()
             let rank: Int
-            // Exact-name match outranks every content source by a wide
-            // margin so queries like "system settings" / "chrome" /
-            // "notion" land at the top above any CLIP-image-noise hits in
-            // the 0.7-0.8 similarity band. 1500 sits in the same band as
-            // window/settings command rows, just under contact pins.
-            if nameLower == q                    { rank = 1500 }
-            else if nameLower.hasPrefix(q)       { rank = 500 }
-            else if wordPrefixMatch(nameLower, q){ rank = 380 }
-            else if nameLower.contains(q)        { rank = 220 }
+            // Tier hierarchy:
+            //   1500 — full name equals query exactly ("notion" → Notion.app)
+            //   1300 — query equals a WORD inside the name ("chrome" → Google Chrome,
+            //          "code" → Visual Studio Code). This sits above file/folder
+            //          exact-name matches (~430) so the app wins over a node_modules
+            //          folder that happens to share the name.
+            //    500 — full name has the query as a prefix
+            //    380 — any word in the name has the query as a prefix
+            //    220 — name contains the query as a substring
+            if nameLower == q                       { rank = 1500 }
+            else if wordEqualMatch(nameLower, q)    { rank = 1300 }
+            else if nameLower.hasPrefix(q)          { rank = 500 }
+            else if wordPrefixMatch(nameLower, q)   { rank = 380 }
+            else if nameLower.contains(q)           { rank = 220 }
             else { continue }
             scored.append((app, rank))
         }
@@ -127,6 +132,17 @@ actor AppSearchService {
         // Match queries against word boundaries, e.g. "settings" → "System Settings".
         for token in name.split(whereSeparator: { !$0.isLetter && !$0.isNumber }) {
             if token.lowercased().hasPrefix(query) { return true }
+        }
+        return false
+    }
+
+    /// True when any whitespace-separated word in the app name equals the
+    /// query exactly (case-insensitive). Catches "chrome" → "Google Chrome"
+    /// and "code" → "Visual Studio Code" — the user clearly means the app,
+    /// not a similarly-named folder.
+    private nonisolated func wordEqualMatch(_ name: String, _ query: String) -> Bool {
+        for token in name.split(whereSeparator: { !$0.isLetter && !$0.isNumber }) {
+            if token.lowercased() == query { return true }
         }
         return false
     }

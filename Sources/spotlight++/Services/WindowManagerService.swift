@@ -77,6 +77,8 @@ final class WindowManagerService {
 
         Entry(alias: "center third",    action: .centerThird, canonical: "Center Third", group: "Thirds"),
         Entry(alias: "middle third",    action: .centerThird, canonical: "Center Third", group: "Thirds"),
+        Entry(alias: "third center",    action: .centerThird, canonical: "Center Third", group: "Thirds"),
+        Entry(alias: "third middle",    action: .centerThird, canonical: "Center Third", group: "Thirds"),
 
         Entry(alias: "right third",     action: .rightThird,  canonical: "Right Third",  group: "Thirds"),
         Entry(alias: "last third",      action: .rightThird,  canonical: "Right Third",  group: "Thirds"),
