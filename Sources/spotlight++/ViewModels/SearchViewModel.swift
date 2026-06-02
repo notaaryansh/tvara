@@ -41,13 +41,36 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var windowResults: [SearchResult] = []
     @Published private(set) var settingsResults: [SearchResult] = []
     @Published private(set) var folderResults: [SearchResult] = []
-    @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var isAIThinking: Bool = false
     @Published private(set) var aiExplanation: String? = nil
     @Published var activeTab: SearchTab = .all {
-        didSet { if oldValue != activeTab { syncDisplayedResults(resetSelection: true) } }
+        didSet { if oldValue != activeTab { selectedIndex = 0 } }
+    }
+
+    /// Single source of truth for what the result list shows. Computed
+    /// fresh from the @Published backing arrays + activeTab on every
+    /// access — there's intentionally no cached `results` field, because
+    /// caching it (which we used to do) inevitably drifted out of sync
+    /// with `count(for:)` and produced the "All 3 / No matches" bug.
+    /// SwiftUI re-renders any view that reads `results` on any @Published
+    /// change of the object, so this stays reactive for free.
+    var results: [SearchResult] {
+        switch activeTab {
+        case .all:
+            return Array(allMerged().prefix(Self.allTabResultCap))
+        case .messages:
+            return Array(messagesMerged().prefix(Self.messagesTabResultCap))
+        case .mail:
+            return mailResults
+        case .apps:
+            return (appResults + fileResults).sorted(by: rankSort)
+        case .images:
+            return imageResults
+        case .clipboard:
+            return clipboardResults
+        }
     }
 
     /// Set true when the current query exactly matches a command alias
@@ -229,7 +252,7 @@ final class SearchViewModel: ObservableObject {
             notionResults = []; linearResults = []; spotifyResults = []
             clipboardResults = []; imageResults = []; windowResults = []
             settingsResults = []; folderResults = []
-            results = []; selectedIndex = 0
+            selectedIndex = 0
             isLoading = false; isAIThinking = false; aiExplanation = nil
             commandExclusivity = false
             return
@@ -252,16 +275,25 @@ final class SearchViewModel: ObservableObject {
         currentSearchID &+= 1
         let searchID = currentSearchID
         isLoading = true
-        syncDisplayedResults(resetSelection: false)
+        // results is computed; no sync needed
 
         Task { [searchID] in
-            let apps = await self.appService.search(query: trimmed)
+            // v0 launcher fan-out — apps + file/folder search via mdfind.
+            // File search is intentionally folder-only for v0 (filtered
+            // below); the underlying service returns both files and
+            // folders so re-enabling file results later is a one-line
+            // change.
+            async let appsTask  = self.appService.search(query: trimmed)
+            async let filesTask = self.fileService.search(query: trimmed)
+            let (apps, files) = await (appsTask, filesTask)
             guard searchID == self.currentSearchID else { return }
             self.appResults = apps
+            // FOLDER-ONLY filter for v0 — keep .folder rows, drop .file
+            // rows. Source enum already tags each result correctly.
+            self.fileResults = files.filter { $0.source == .folder }
             // Clear stale content arrays so a prior query's results don't
             // leak into the merged view if/when content is re-enabled.
             self.browserResults = []
-            self.fileResults = []
             self.whatsappResults = []
             self.discordResults = []
             self.imessageResults = []
@@ -274,7 +306,7 @@ final class SearchViewModel: ObservableObject {
             self.imageResults = []
             self.aiExplanation = nil
             self.isAIThinking = false
-            self.syncDisplayedResults(resetSelection: true)
+            self.selectedIndex = 0
             self.isLoading = false
         }
 
@@ -425,7 +457,7 @@ final class SearchViewModel: ObservableObject {
         self.aiExplanation = needle.isEmpty
             ? "Opening \(label)"
             : "Looking in \(label) for \"\(needle)\""
-        self.syncDisplayedResults(resetSelection: true)
+        self.selectedIndex = 0
         self.isLoading = false
         self.isAIThinking = false
     }
@@ -470,7 +502,7 @@ final class SearchViewModel: ObservableObject {
             if exact { commandExclusivity = true }
         }
 
-        self.syncDisplayedResults(resetSelection: true)
+        self.selectedIndex = 0
         self.isLoading = false
     }
 
@@ -571,7 +603,7 @@ final class SearchViewModel: ObservableObject {
             self.linearResults = []
             self.spotifyResults = []
             self.clipboardResults = []
-            self.syncDisplayedResults(resetSelection: true)
+            self.selectedIndex = 0
             self.isLoading = false
             return
         }
@@ -603,7 +635,7 @@ final class SearchViewModel: ObservableObject {
             self.linearResults = []
             self.spotifyResults = []
             self.clipboardResults = []
-            self.syncDisplayedResults(resetSelection: true)
+            self.selectedIndex = 0
             self.isLoading = false
             return
         }
@@ -728,18 +760,30 @@ final class SearchViewModel: ObservableObject {
     /// strong matches (contact name hits at 1000, exact-match apps at 600)
     /// land at the top regardless of source.
     private func allMerged() -> [SearchResult] {
-        // v0: commands-only launcher. Only the four command sources
-        // contribute to the merged view; content arrays remain populated
-        // on the model but are not surfaced here.
+        // v0: commands + apps + (filtered) file-search folders. Other
+        // content sources remain populated on the model but are not
+        // surfaced. fileResults is pre-filtered to .folder rows only in
+        // performSearch so this stays a "command-shaped" merge.
         var commands: [SearchResult] = []
         commands.reserveCapacity(
             appResults.count + windowResults.count
             + settingsResults.count + folderResults.count
+            + fileResults.count
         )
         commands.append(contentsOf: appResults)
         commands.append(contentsOf: windowResults)
         commands.append(contentsOf: settingsResults)
         commands.append(contentsOf: folderResults)
+        commands.append(contentsOf: fileResults)
+
+        // Fuzzy suppression: if ANY non-fuzzy match exists in the merged
+        // set, drop all fuzzy matches. Fuzzy is a typo-tolerant fallback
+        // — it should only be visible when nothing else matched at all.
+        // Keeps "shirim" from listing Siri alongside the real shirim
+        // folder.
+        if commands.contains(where: { !$0.isFuzzyMatch }) {
+            commands.removeAll(where: { $0.isFuzzyMatch })
+        }
         return commands.sorted(by: rankSort)
     }
 
@@ -760,25 +804,9 @@ final class SearchViewModel: ObservableObject {
         return (a.date ?? .distantPast) > (b.date ?? .distantPast)
     }
 
-    private func syncDisplayedResults(resetSelection: Bool) {
-        switch activeTab {
-        case .all:
-            results = Array(allMerged().prefix(Self.allTabResultCap))
-        case .messages:
-            results = Array(messagesMerged().prefix(Self.messagesTabResultCap))
-        case .mail:
-            results = mailResults
-        case .apps:
-            // "Apps" pill is really "things you can open" — apps + files + folders,
-            // ranked together so app exact-matches sit above looser file substrings.
-            results = (appResults + fileResults).sorted(by: rankSort)
-        case .images:
-            results = imageResults
-        case .clipboard:
-            results = clipboardResults
-        }
-        if resetSelection { selectedIndex = 0 }
-    }
+    // `results` is computed (see top of file). Selection reset is handled
+    // explicitly at each call site that previously called
+    // syncDisplayedResults(resetSelection: true).
 
     // MARK: - Selection / open
 
@@ -937,7 +965,8 @@ final class SearchViewModel: ObservableObject {
         actingOn = result
         composeState = nil
         query = ""
-        results = []
+        // `results` is computed off backing arrays; clearing query already
+        // empties them via performSearch's empty branch.
         aiExplanation = nil
     }
 
@@ -1102,7 +1131,6 @@ final class SearchViewModel: ObservableObject {
         composeState = nil
         actingOn = nil
         query = ""
-        results = []
     }
 
     /// Best-effort avatar lookup. We do a quick `search(query: name)` on
@@ -1133,7 +1161,7 @@ final class SearchViewModel: ObservableObject {
         imessageResults = []; mailResults = []; notesResults = []
         clipboardResults = []; windowResults = []
         settingsResults = []; folderResults = []
-        results = []; selectedIndex = 0
+        selectedIndex = 0
         isLoading = false; isAIThinking = false; aiExplanation = nil
         commandExclusivity = false
         activeTab = .all

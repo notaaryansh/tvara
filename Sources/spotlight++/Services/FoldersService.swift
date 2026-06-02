@@ -104,11 +104,17 @@ final class FoldersService {
         fuzzyHits.sort { $0.1 < $1.1 }
         return Self.render(
             entries: fuzzyHits.prefix(8).map { $0.0 },
-            rankBase: 865
+            // Fuzzy fallback below the prefix band (925) and below
+            // file/folder exact-name matches — typo'd shortcut shouldn't
+            // beat a real folder.
+            rankBase: 250,
+            isFuzzy: true
         )
     }
 
-    private static func render(entries: [Entry], rankBase: Int) -> [SearchResult] {
+    private static func render(
+        entries: [Entry], rankBase: Int, isFuzzy: Bool = false
+    ) -> [SearchResult] {
         entries.enumerated().map { idx, entry in
             SearchResult(
                 title: entry.canonical,
@@ -117,7 +123,8 @@ final class FoldersService {
                 date: nil,
                 badge: nil,
                 openTarget: .file(entry.path),
-                rank: rankBase - idx
+                rank: rankBase - idx,
+                isFuzzyMatch: isFuzzy
             )
         }
     }

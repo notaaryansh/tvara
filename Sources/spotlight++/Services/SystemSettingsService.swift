@@ -239,11 +239,17 @@ final class SystemSettingsService {
         fuzzyHits.sort { $0.1 < $1.1 }
         return Self.render(
             entries: fuzzyHits.prefix(8).map { $0.0 },
-            rankBase: 870
+            // Fuzzy fallback well below the prefix band (930) and below
+            // file/folder exact-name matches — typo'd settings shouldn't
+            // beat a real folder match.
+            rankBase: 260,
+            isFuzzy: true
         )
     }
 
-    private static func render(entries: [Entry], rankBase: Int) -> [SearchResult] {
+    private static func render(
+        entries: [Entry], rankBase: Int, isFuzzy: Bool = false
+    ) -> [SearchResult] {
         entries.enumerated().map { idx, entry in
             SearchResult(
                 title: entry.canonical,
@@ -253,7 +259,8 @@ final class SystemSettingsService {
                 badge: nil,
                 openTarget: .url("x-apple.systempreferences:\(entry.paneID)"),
                 rank: rankBase - idx,
-                iconData: Self.settingsAppIconData
+                iconData: Self.settingsAppIconData,
+                isFuzzyMatch: isFuzzy
             )
         }
     }

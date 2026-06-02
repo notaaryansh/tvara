@@ -18,6 +18,12 @@ struct SearchResult: Identifiable, Hashable {
     /// HTTPS URL of cover art for sources like Spotify where we have the
     /// CDN URL but no local image bytes. Row view does an async download.
     let remoteArtURL: String?
+    /// True when this row was produced via Levenshtein fuzzy fallback
+    /// (typo-tolerant match) rather than a literal prefix / exact /
+    /// contains match. Used by the ViewModel to suppress fuzzy guesses
+    /// when any "proper" match exists anywhere in the merged set —
+    /// avoids `shirim` showing Siri alongside the real shirim folder.
+    let isFuzzyMatch: Bool
 
     init(
         title: String,
@@ -29,7 +35,8 @@ struct SearchResult: Identifiable, Hashable {
         rank: Int,
         iconData: Data? = nil,
         senderName: String? = nil,
-        remoteArtURL: String? = nil
+        remoteArtURL: String? = nil,
+        isFuzzyMatch: Bool = false
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -41,6 +48,7 @@ struct SearchResult: Identifiable, Hashable {
         self.iconData = iconData
         self.senderName = senderName
         self.remoteArtURL = remoteArtURL
+        self.isFuzzyMatch = isFuzzyMatch
     }
 
     var displayTitle: String {
@@ -57,7 +65,7 @@ struct SearchResult: Identifiable, Hashable {
             title: title, subtitle: subtitle, source: source, date: date,
             badge: badge, openTarget: openTarget, rank: newRank,
             iconData: iconData, senderName: senderName,
-            remoteArtURL: remoteArtURL
+            remoteArtURL: remoteArtURL, isFuzzyMatch: isFuzzyMatch
         )
     }
 

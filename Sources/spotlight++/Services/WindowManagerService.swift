@@ -173,7 +173,13 @@ final class WindowManagerService {
         return Self.render(
             entries: fuzzyHits.prefix(8).map { $0.0 },
             targetAppName: targetAppName,
-            rankBase: 880
+            // Fuzzy fallback ranks BELOW any prefix match (940) and below
+            // file/folder exact-name matches from FileSearchService (~430).
+            // A typo'd window action shouldn't beat a real exact-name file
+            // hit; if the user genuinely meant the window action, more
+            // typing will resolve via the prefix path.
+            rankBase: 270,
+            isFuzzy: true
         )
     }
 
@@ -185,7 +191,8 @@ final class WindowManagerService {
     private static func render(
         entries: [Entry],
         targetAppName: String?,
-        rankBase: Int
+        rankBase: Int,
+        isFuzzy: Bool = false
     ) -> [SearchResult] {
         entries.enumerated().map { idx, entry in
             let breadcrumb = "Window > \(entry.group)"
@@ -197,7 +204,8 @@ final class WindowManagerService {
                 date: nil,
                 badge: nil,
                 openTarget: .windowAction(entry.action),
-                rank: rankBase - idx
+                rank: rankBase - idx,
+                isFuzzyMatch: isFuzzy
             )
         }
     }

@@ -19,12 +19,14 @@ final class WindowSnapOverlayController {
         self.viewModel = viewModel
         self.windowService = windowService
 
-        // Re-evaluate the overlay every time the result list OR the
-        // selected index changes. CombineLatest fires once with the
-        // initial state of both, then again on any subsequent change.
-        Publishers.CombineLatest(viewModel.$results, viewModel.$selectedIndex)
+        // Re-evaluate on any ViewModel change. `results` is now computed
+        // off backing arrays, so we can't subscribe to it directly via
+        // Publishers.CombineLatest — instead we listen on objectWillChange
+        // (fires before any @Published mutates) and recompute synchronously
+        // on the next runloop tick.
+        viewModel.objectWillChange
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in self?.update() }
+            .sink { [weak self] _ in self?.update() }
             .store(in: &cancellables)
     }
 

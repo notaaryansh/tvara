@@ -81,11 +81,13 @@ actor AppSearchService {
                         date: nil,
                         badge: nil,
                         openTarget: .file(app.path),
-                        // Below the exact-name band (1500) but well above
-                        // any prior contact-pin or content rank — fuzzy
-                        // apps still want to dominate when they're the
-                        // only thing that matched.
-                        rank: 1400
+                        // Fuzzy matches are GUESSES — they must rank below
+                        // exact matches from any other source. Sits below
+                        // FileSearchService's exact-filename match (~430)
+                        // and below app prefix matches (500). Still shows
+                        // up when no exact/prefix match exists anywhere.
+                        rank: 280,
+                        isFuzzyMatch: true
                     )
                 }
             }
