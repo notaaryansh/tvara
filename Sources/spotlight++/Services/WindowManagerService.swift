@@ -21,108 +21,88 @@ final class WindowManagerService {
     /// declared as separate rows so a single typed prefix can hit the same
     /// preset through any of its phrasings. Declaration order is the
     /// permanent display priority — first matching action wins ties.
+    ///
+    /// `group` is the breadcrumb segment under "Window" — surfaces in the
+    /// row subtitle as "Window > Halves · Terminal", same path-aware shape
+    /// the Settings and Folders sources use.
     private struct Entry {
         let alias: String       // lowercase, what the user types
         let action: WindowAction
         let canonical: String   // shown as the row title ("Left Half")
+        let group: String       // breadcrumb segment ("Halves", "Quadrants"…)
     }
 
     /// Hardcoded alias list. Add a line here when you notice yourself
     /// typing something that doesn't match. No runtime cost — entries are
-    /// scanned linearly, ~200 entries is sub-millisecond.
+    /// scanned linearly, ~80 entries is sub-millisecond.
+    ///
+    /// "Bare" single-word aliases like `left` / `right` / `top` / `max`
+    /// were intentionally pruned for v0 — they exact-matched too easily and
+    /// would suppress content rows under the command/content exclusivity
+    /// rule (typing `max` would hide messages from a contact named Max).
+    /// You still get fast disambiguation via the multi-word aliases.
     private static let entries: [Entry] = [
         // ─── Halves ───────────────────────────────────────────────────
-        Entry(alias: "left half",       action: .leftHalf,   canonical: "Left Half"),
-        Entry(alias: "left",            action: .leftHalf,   canonical: "Left Half"),
-        Entry(alias: "snap left",       action: .leftHalf,   canonical: "Left Half"),
-        Entry(alias: "half left",       action: .leftHalf,   canonical: "Left Half"),
-        Entry(alias: "lh",              action: .leftHalf,   canonical: "Left Half"),
+        Entry(alias: "left half",       action: .leftHalf,   canonical: "Left Half",  group: "Halves"),
+        Entry(alias: "snap left",       action: .leftHalf,   canonical: "Left Half",  group: "Halves"),
+        Entry(alias: "half left",       action: .leftHalf,   canonical: "Left Half",  group: "Halves"),
+        Entry(alias: "lh",              action: .leftHalf,   canonical: "Left Half",  group: "Halves"),
 
-        Entry(alias: "right half",      action: .rightHalf,  canonical: "Right Half"),
-        Entry(alias: "right",           action: .rightHalf,  canonical: "Right Half"),
-        Entry(alias: "snap right",      action: .rightHalf,  canonical: "Right Half"),
-        Entry(alias: "half right",      action: .rightHalf,  canonical: "Right Half"),
-        Entry(alias: "rh",              action: .rightHalf,  canonical: "Right Half"),
+        Entry(alias: "right half",      action: .rightHalf,  canonical: "Right Half", group: "Halves"),
+        Entry(alias: "snap right",      action: .rightHalf,  canonical: "Right Half", group: "Halves"),
+        Entry(alias: "half right",      action: .rightHalf,  canonical: "Right Half", group: "Halves"),
+        Entry(alias: "rh",              action: .rightHalf,  canonical: "Right Half", group: "Halves"),
 
-        Entry(alias: "top half",        action: .topHalf,    canonical: "Top Half"),
-        Entry(alias: "top",             action: .topHalf,    canonical: "Top Half"),
-        Entry(alias: "upper half",      action: .topHalf,    canonical: "Top Half"),
-        Entry(alias: "upper",           action: .topHalf,    canonical: "Top Half"),
-        Entry(alias: "th",              action: .topHalf,    canonical: "Top Half"),
+        // ─── Quadrants ────────────────────────────────────────────────
+        Entry(alias: "top left",        action: .topLeft,     canonical: "Top Left",     group: "Quadrants"),
+        Entry(alias: "upper left",      action: .topLeft,     canonical: "Top Left",     group: "Quadrants"),
+        Entry(alias: "tl",              action: .topLeft,     canonical: "Top Left",     group: "Quadrants"),
 
-        Entry(alias: "bottom half",     action: .bottomHalf, canonical: "Bottom Half"),
-        Entry(alias: "bottom",          action: .bottomHalf, canonical: "Bottom Half"),
-        Entry(alias: "lower half",      action: .bottomHalf, canonical: "Bottom Half"),
-        Entry(alias: "lower",           action: .bottomHalf, canonical: "Bottom Half"),
-        Entry(alias: "bh",              action: .bottomHalf, canonical: "Bottom Half"),
+        Entry(alias: "top right",       action: .topRight,    canonical: "Top Right",    group: "Quadrants"),
+        Entry(alias: "upper right",     action: .topRight,    canonical: "Top Right",    group: "Quadrants"),
+        Entry(alias: "tr",              action: .topRight,    canonical: "Top Right",    group: "Quadrants"),
 
-        // ─── Quarters ─────────────────────────────────────────────────
-        Entry(alias: "top left",        action: .topLeft,    canonical: "Top Left"),
-        Entry(alias: "upper left",      action: .topLeft,    canonical: "Top Left"),
-        Entry(alias: "tl",              action: .topLeft,    canonical: "Top Left"),
+        Entry(alias: "bottom left",     action: .bottomLeft,  canonical: "Bottom Left",  group: "Quadrants"),
+        Entry(alias: "lower left",      action: .bottomLeft,  canonical: "Bottom Left",  group: "Quadrants"),
+        Entry(alias: "bl",              action: .bottomLeft,  canonical: "Bottom Left",  group: "Quadrants"),
 
-        Entry(alias: "top right",       action: .topRight,   canonical: "Top Right"),
-        Entry(alias: "upper right",     action: .topRight,   canonical: "Top Right"),
-        Entry(alias: "tr",              action: .topRight,   canonical: "Top Right"),
-
-        Entry(alias: "bottom left",     action: .bottomLeft, canonical: "Bottom Left"),
-        Entry(alias: "lower left",      action: .bottomLeft, canonical: "Bottom Left"),
-        Entry(alias: "bl",              action: .bottomLeft, canonical: "Bottom Left"),
-
-        Entry(alias: "bottom right",    action: .bottomRight, canonical: "Bottom Right"),
-        Entry(alias: "lower right",     action: .bottomRight, canonical: "Bottom Right"),
-        Entry(alias: "br",              action: .bottomRight, canonical: "Bottom Right"),
+        Entry(alias: "bottom right",    action: .bottomRight, canonical: "Bottom Right", group: "Quadrants"),
+        Entry(alias: "lower right",     action: .bottomRight, canonical: "Bottom Right", group: "Quadrants"),
+        Entry(alias: "br",              action: .bottomRight, canonical: "Bottom Right", group: "Quadrants"),
 
         // ─── Thirds ───────────────────────────────────────────────────
-        Entry(alias: "left third",      action: .leftThird,   canonical: "Left Third"),
-        Entry(alias: "first third",     action: .leftThird,   canonical: "Left Third"),
-        Entry(alias: "third left",      action: .leftThird,   canonical: "Left Third"),
+        Entry(alias: "left third",      action: .leftThird,   canonical: "Left Third",   group: "Thirds"),
+        Entry(alias: "first third",     action: .leftThird,   canonical: "Left Third",   group: "Thirds"),
+        Entry(alias: "third left",      action: .leftThird,   canonical: "Left Third",   group: "Thirds"),
 
-        Entry(alias: "center third",    action: .centerThird, canonical: "Center Third"),
-        Entry(alias: "middle third",    action: .centerThird, canonical: "Center Third"),
-        Entry(alias: "center",          action: .centerThird, canonical: "Center Third"),
+        Entry(alias: "center third",    action: .centerThird, canonical: "Center Third", group: "Thirds"),
+        Entry(alias: "middle third",    action: .centerThird, canonical: "Center Third", group: "Thirds"),
 
-        Entry(alias: "right third",     action: .rightThird,  canonical: "Right Third"),
-        Entry(alias: "last third",      action: .rightThird,  canonical: "Right Third"),
-        Entry(alias: "third right",     action: .rightThird,  canonical: "Right Third"),
+        Entry(alias: "right third",     action: .rightThird,  canonical: "Right Third",  group: "Thirds"),
+        Entry(alias: "last third",      action: .rightThird,  canonical: "Right Third",  group: "Thirds"),
+        Entry(alias: "third right",     action: .rightThird,  canonical: "Right Third",  group: "Thirds"),
 
-        // ─── Two-thirds ───────────────────────────────────────────────
-        Entry(alias: "left two thirds",  action: .leftTwoThirds,  canonical: "Left Two-Thirds"),
-        Entry(alias: "left 2/3",         action: .leftTwoThirds,  canonical: "Left Two-Thirds"),
-        Entry(alias: "two thirds left",  action: .leftTwoThirds,  canonical: "Left Two-Thirds"),
+        // ─── Display ──────────────────────────────────────────────────
+        Entry(alias: "maximize",         action: .maximize,        canonical: "Maximize",         group: "Display"),
+        Entry(alias: "fullscreen",       action: .maximize,        canonical: "Maximize",         group: "Display"),
+        Entry(alias: "fill screen",      action: .maximize,        canonical: "Maximize",         group: "Display"),
 
-        Entry(alias: "right two thirds", action: .rightTwoThirds, canonical: "Right Two-Thirds"),
-        Entry(alias: "right 2/3",        action: .rightTwoThirds, canonical: "Right Two-Thirds"),
-        Entry(alias: "two thirds right", action: .rightTwoThirds, canonical: "Right Two-Thirds"),
+        Entry(alias: "minimize",         action: .minimize,        canonical: "Minimize",         group: "Display"),
+        Entry(alias: "min",              action: .minimize,        canonical: "Minimize",         group: "Display"),
+        Entry(alias: "hide to dock",     action: .minimize,        canonical: "Minimize",         group: "Display"),
 
-        // ─── Whole-screen ─────────────────────────────────────────────
-        Entry(alias: "maximize",         action: .maximize,       canonical: "Maximize"),
-        Entry(alias: "max",              action: .maximize,       canonical: "Maximize"),
-        Entry(alias: "full",             action: .maximize,       canonical: "Maximize"),
-        Entry(alias: "fullscreen",       action: .maximize,       canonical: "Maximize"),
-        Entry(alias: "fill",             action: .maximize,       canonical: "Maximize"),
-        Entry(alias: "whole",            action: .maximize,       canonical: "Maximize"),
+        Entry(alias: "center window",    action: .center,          canonical: "Center Window",    group: "Display"),
+        Entry(alias: "centre window",    action: .center,          canonical: "Center Window",    group: "Display"),
 
-        Entry(alias: "almost maximize",  action: .almostMaximize, canonical: "Almost Maximize"),
-        Entry(alias: "near max",         action: .almostMaximize, canonical: "Almost Maximize"),
-        Entry(alias: "near maximize",    action: .almostMaximize, canonical: "Almost Maximize"),
+        Entry(alias: "next display",     action: .nextDisplay,     canonical: "Next Display",     group: "Display"),
+        Entry(alias: "next monitor",     action: .nextDisplay,     canonical: "Next Display",     group: "Display"),
+        Entry(alias: "next screen",      action: .nextDisplay,     canonical: "Next Display",     group: "Display"),
+        Entry(alias: "other display",    action: .nextDisplay,     canonical: "Next Display",     group: "Display"),
 
-        Entry(alias: "center window",    action: .center,         canonical: "Center Window"),
-        Entry(alias: "centre",           action: .center,         canonical: "Center Window"),
-        Entry(alias: "middle",           action: .center,         canonical: "Center Window"),
-
-        // ─── Multi-display ────────────────────────────────────────────
-        Entry(alias: "next display",     action: .nextDisplay,     canonical: "Next Display"),
-        Entry(alias: "next monitor",     action: .nextDisplay,     canonical: "Next Display"),
-        Entry(alias: "next screen",      action: .nextDisplay,     canonical: "Next Display"),
-        Entry(alias: "other display",    action: .nextDisplay,     canonical: "Next Display"),
-        Entry(alias: "other monitor",    action: .nextDisplay,     canonical: "Next Display"),
-        Entry(alias: "other screen",     action: .nextDisplay,     canonical: "Next Display"),
-
-        Entry(alias: "previous display", action: .previousDisplay, canonical: "Previous Display"),
-        Entry(alias: "prev display",     action: .previousDisplay, canonical: "Previous Display"),
-        Entry(alias: "previous monitor", action: .previousDisplay, canonical: "Previous Display"),
-        Entry(alias: "previous screen",  action: .previousDisplay, canonical: "Previous Display"),
+        Entry(alias: "previous display", action: .previousDisplay, canonical: "Previous Display", group: "Display"),
+        Entry(alias: "prev display",     action: .previousDisplay, canonical: "Previous Display", group: "Display"),
+        Entry(alias: "previous monitor", action: .previousDisplay, canonical: "Previous Display", group: "Display"),
+        Entry(alias: "previous screen",  action: .previousDisplay, canonical: "Previous Display", group: "Display"),
     ]
 
     /// Stopwords stripped only from the FRONT of the query so phrases like
@@ -154,34 +134,84 @@ final class WindowManagerService {
         let normalized = Self.normalize(rawQuery)
         guard !normalized.isEmpty else { return [] }
 
-        // One pass: collect first entry per WindowAction whose alias
-        // starts with the normalized query. Declaration order is preserved.
+        // ─── Pass 1: prefix match (instant, primary path) ─────────────
         var seen: Set<WindowAction> = []
-        var hits: [Entry] = []
+        var prefixHits: [Entry] = []
         for entry in Self.entries {
             guard entry.alias.hasPrefix(normalized) else { continue }
             guard !seen.contains(entry.action) else { continue }
             seen.insert(entry.action)
-            hits.append(entry)
+            prefixHits.append(entry)
         }
-        // Cap at 8 so a one-letter query doesn't dump 20 rows into the list.
-        let capped = hits.prefix(8)
+        if !prefixHits.isEmpty {
+            return Self.render(
+                entries: Array(prefixHits.prefix(8)),
+                targetAppName: targetAppName,
+                rankBase: 940
+            )
+        }
 
-        let appLabel = targetAppName.map { "Window · \($0)" } ?? "Window"
-        // Window rows want to outrank generic apps/files but sit below the
-        // "open chat" contact-card pins at rank 1000. 940-{n} keeps them
-        // grouped + ordered by declaration.
-        return capped.enumerated().map { idx, entry in
-            SearchResult(
+        // ─── Pass 2: fuzzy fallback (typo-tolerant) ────────────────────
+        // Only runs when prefix returned zero, so worst case is bounded:
+        // ~50 aliases × ~5 µs each = ~250 µs per keystroke when the
+        // user has actually typo'd. Zero cost on the common path.
+        let budget = FuzzyMatch.budget(for: normalized)
+        guard budget > 0 else { return [] }
+        seen.removeAll(keepingCapacity: true)
+        var fuzzyHits: [(Entry, Int)] = []
+        for entry in Self.entries {
+            guard !seen.contains(entry.action) else { continue }
+            if let dist = FuzzyMatch.levenshtein(
+                normalized, entry.alias, budget: budget
+            ) {
+                seen.insert(entry.action)
+                fuzzyHits.append((entry, dist))
+            }
+        }
+        // Sort by ascending distance — closest typos first.
+        fuzzyHits.sort { $0.1 < $1.1 }
+        return Self.render(
+            entries: fuzzyHits.prefix(8).map { $0.0 },
+            targetAppName: targetAppName,
+            rankBase: 880
+        )
+    }
+
+    /// Render a deduped, ordered list of Entry values into the SearchResult
+    /// shape both prefix and fuzzy paths produce. `rankBase` distinguishes
+    /// prefix (940) from fuzzy (880) — they never appear in the same call,
+    /// but the lower fuzzy band keeps the visual cue if anything else ever
+    /// merges into the same list.
+    private static func render(
+        entries: [Entry],
+        targetAppName: String?,
+        rankBase: Int
+    ) -> [SearchResult] {
+        entries.enumerated().map { idx, entry in
+            let breadcrumb = "Window > \(entry.group)"
+            let subtitle = targetAppName.map { "\(breadcrumb) · \($0)" } ?? breadcrumb
+            return SearchResult(
                 title: entry.canonical,
-                subtitle: appLabel,
+                subtitle: subtitle,
                 source: .window,
                 date: nil,
                 badge: nil,
                 openTarget: .windowAction(entry.action),
-                rank: 940 - idx
+                rank: rankBase - idx
             )
         }
+    }
+
+    /// True when the normalized query exactly matches one of our aliases.
+    /// Used by the ViewModel's exclusivity rule — exact command match →
+    /// hide content rows. Strict-equality only (not prefix) so partial
+    /// typing keeps content visible until the user has committed to a
+    /// command name.
+    func hasExactMatch(query rawQuery: String) -> Bool {
+        guard targetPID != nil else { return false }
+        let normalized = Self.normalize(rawQuery)
+        guard !normalized.isEmpty else { return false }
+        return Self.entries.contains { $0.alias == normalized }
     }
 
     /// Lowercase, trim, drop leading stopwords, apply synonyms, rejoin.
@@ -220,6 +250,10 @@ final class WindowManagerService {
         let currentScreen = Self.screenContaining(currentRect)
 
         switch action {
+        case .minimize:
+            // No snap target — the window is going to the Dock. Returning
+            // nil tells the overlay controller to hide.
+            return nil
         case .nextDisplay, .previousDisplay:
             let screens = NSScreen.screens
             guard screens.count > 1 else { return nil }
@@ -297,6 +331,11 @@ final class WindowManagerService {
         let currentScreen = Self.screenContaining(currentRect)
 
         switch action {
+        case .minimize:
+            // No frame change — just toggle the AX minimized attribute.
+            // Snap-overlay preview already hid for this action because
+            // previewRect returns nil.
+            return setMinimized(window: window, true)
         case .nextDisplay, .previousDisplay:
             return moveToAdjacentDisplay(
                 window: window,
@@ -314,6 +353,17 @@ final class WindowManagerService {
             let rect = Self.rect(for: action, on: currentScreen)
             return setFrame(window: window, rect: rect)
         }
+    }
+
+    /// Toggle kAXMinimizedAttribute on the focused window. Returns the
+    /// AX status — false if the attribute is unsupported (rare; most
+    /// app windows expose it).
+    private func setMinimized(window: AXUIElement, _ minimized: Bool) -> Bool {
+        let value = minimized as CFBoolean
+        let status = AXUIElementSetAttributeValue(
+            window, kAXMinimizedAttribute as CFString, value
+        )
+        return status == .success
     }
 
     /// Set position + size in two separate AX calls. Some apps refuse to
@@ -392,8 +442,6 @@ final class WindowManagerService {
         switch action {
         case .leftHalf:        return CGRect(x: x,           y: y,           width: w/2,    height: h)
         case .rightHalf:       return CGRect(x: x + w/2,     y: y,           width: w/2,    height: h)
-        case .topHalf:         return CGRect(x: x,           y: y,           width: w,      height: h/2)
-        case .bottomHalf:      return CGRect(x: x,           y: y + h/2,     width: w,      height: h/2)
         case .topLeft:         return CGRect(x: x,           y: y,           width: w/2,    height: h/2)
         case .topRight:        return CGRect(x: x + w/2,     y: y,           width: w/2,    height: h/2)
         case .bottomLeft:      return CGRect(x: x,           y: y + h/2,     width: w/2,    height: h/2)
@@ -401,15 +449,11 @@ final class WindowManagerService {
         case .leftThird:       return CGRect(x: x,           y: y,           width: w/3,    height: h)
         case .centerThird:     return CGRect(x: x + w/3,     y: y,           width: w/3,    height: h)
         case .rightThird:      return CGRect(x: x + 2*w/3,   y: y,           width: w/3,    height: h)
-        case .leftTwoThirds:   return CGRect(x: x,           y: y,           width: 2*w/3,  height: h)
-        case .rightTwoThirds:  return CGRect(x: x + w/3,     y: y,           width: 2*w/3,  height: h)
         case .maximize:        return CGRect(x: x,           y: y,           width: w,      height: h)
-        case .almostMaximize:
-            let m: CGFloat = 40
-            return CGRect(x: x + m, y: y + m, width: w - 2*m, height: h - 2*m)
-        case .center, .nextDisplay, .previousDisplay:
-            // Handled by their own code paths in execute() — these need
-            // the current window size to round-trip.
+        case .minimize, .center, .nextDisplay, .previousDisplay:
+            // Handled by their own code paths in execute() — these don't
+            // have a static rect (minimize hides the window; center +
+            // displays preserve the current size).
             return v
         }
     }

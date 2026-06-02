@@ -14,6 +14,17 @@ actor AppSearchService {
         await refreshCacheIfNeeded()
     }
 
+    /// True when the typed query equals one installed app's name exactly
+    /// (case-insensitive). Used by SearchViewModel's command/content
+    /// exclusivity rule. Strict equality only — prefix matches keep
+    /// content visible until the user has committed to a full app name.
+    func hasExactNameMatch(query: String) async -> Bool {
+        let normalized = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !normalized.isEmpty else { return false }
+        await refreshCacheIfNeeded()
+        return cache.contains { $0.name.lowercased() == normalized }
+    }
+
     func search(query: String, limit: Int = 20) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
@@ -27,7 +38,12 @@ actor AppSearchService {
         for app in cache {
             let nameLower = app.name.lowercased()
             let rank: Int
-            if nameLower == q                    { rank = 600 }
+            // Exact-name match outranks every content source by a wide
+            // margin so queries like "system settings" / "chrome" /
+            // "notion" land at the top above any CLIP-image-noise hits in
+            // the 0.7-0.8 similarity band. 1500 sits in the same band as
+            // window/settings command rows, just under contact pins.
+            if nameLower == q                    { rank = 1500 }
             else if nameLower.hasPrefix(q)       { rank = 500 }
             else if wordPrefixMatch(nameLower, q){ rank = 380 }
             else if nameLower.contains(q)        { rank = 220 }

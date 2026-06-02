@@ -86,8 +86,6 @@ struct WindowActionPreview: View {
         switch action {
         case .leftHalf:        return CGRect(x: 0,         y: 0,       width: w/2,    height: h)
         case .rightHalf:       return CGRect(x: w/2,       y: 0,       width: w/2,    height: h)
-        case .topHalf:         return CGRect(x: 0,         y: 0,       width: w,      height: h/2)
-        case .bottomHalf:      return CGRect(x: 0,         y: h/2,     width: w,      height: h/2)
         case .topLeft:         return CGRect(x: 0,         y: 0,       width: w/2,    height: h/2)
         case .topRight:        return CGRect(x: w/2,       y: 0,       width: w/2,    height: h/2)
         case .bottomLeft:      return CGRect(x: 0,         y: h/2,     width: w/2,    height: h/2)
@@ -95,20 +93,19 @@ struct WindowActionPreview: View {
         case .leftThird:       return CGRect(x: 0,         y: 0,       width: w/3,    height: h)
         case .centerThird:     return CGRect(x: w/3,       y: 0,       width: w/3,    height: h)
         case .rightThird:      return CGRect(x: 2*w/3,     y: 0,       width: w/3,    height: h)
-        case .leftTwoThirds:   return CGRect(x: 0,         y: 0,       width: 2*w/3,  height: h)
-        case .rightTwoThirds:  return CGRect(x: w/3,       y: 0,       width: 2*w/3,  height: h)
         case .maximize:        return CGRect(x: 0,         y: 0,       width: w,      height: h)
-        case .almostMaximize:
-            // Visual margin scales with the preview size so the inset is
-            // perceptible even on the small icon variant.
-            let m = max(w * 0.08, 1.5)
-            return CGRect(x: m, y: m, width: w - 2*m, height: h - 2*m)
         case .center:
             // Center preset preserves the window's existing size at runtime;
             // we don't know what that is, so render a representative 62%
             // centered block.
             let cw = w * 0.62, ch = h * 0.62
             return CGRect(x: (w - cw)/2, y: (h - ch)/2, width: cw, height: ch)
+        case .minimize:
+            // Tiny chip near the bottom edge representing "dock destination"
+            // — the icon-slot preview still needs SOMETHING to render even
+            // though the desktop overlay hides for this action.
+            let chipW = w * 0.20, chipH = h * 0.18
+            return CGRect(x: (w - chipW)/2, y: h - chipH - 1, width: chipW, height: chipH)
         case .nextDisplay, .previousDisplay:
             return .zero  // handled by multiDisplayPreview
         }

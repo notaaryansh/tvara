@@ -116,6 +116,7 @@ struct SearchResult: Identifiable, Hashable {
         case spotify   = "Spotify"
         case images    = "Images"
         case window    = "Window"
+        case settings  = "Settings"
 
         var icon: String {
             switch self {
@@ -138,6 +139,7 @@ struct SearchResult: Identifiable, Hashable {
             case .spotify:   return "music.note"
             case .images:    return "photo.fill"
             case .window:    return "macwindow"
+            case .settings:  return "gearshape.fill"
             }
         }
 
@@ -162,6 +164,7 @@ struct SearchResult: Identifiable, Hashable {
             case .spotify:   return Color(red: 0.12, green: 0.84, blue: 0.38)   // Spotify green
             case .images:    return Color(red: 0.93, green: 0.55, blue: 0.20)   // warm orange (photo)
             case .window:    return Color(red: 0.35, green: 0.55, blue: 0.75)   // calm steel-blue
+            case .settings:  return Color(red: 0.55, green: 0.58, blue: 0.62)   // gunmetal gray
             }
         }
     }

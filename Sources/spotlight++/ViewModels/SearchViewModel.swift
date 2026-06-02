@@ -39,6 +39,8 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var clipboardResults: [SearchResult] = []
     @Published private(set) var imageResults: [SearchResult] = []
     @Published private(set) var windowResults: [SearchResult] = []
+    @Published private(set) var settingsResults: [SearchResult] = []
+    @Published private(set) var folderResults: [SearchResult] = []
     @Published private(set) var results: [SearchResult] = []
     @Published var selectedIndex: Int = 0
     @Published private(set) var isLoading: Bool = false
@@ -47,6 +49,14 @@ final class SearchViewModel: ObservableObject {
     @Published var activeTab: SearchTab = .all {
         didSet { if oldValue != activeTab { syncDisplayedResults(resetSelection: true) } }
     }
+
+    /// Set true when the current query exactly matches a command alias
+    /// (window action, settings pane, folder shortcut, or installed app
+    /// name). Drives the allMerged filter — content sources (messages,
+    /// mail, notes, files, images, clipboard, browser) are excluded while
+    /// this is set, so typing "top right" doesn't surface random image
+    /// hits alongside the actual command.
+    @Published private(set) var commandExclusivity: Bool = false
 
     /// Compose flow: nil = normal search. When non-nil, the SearchView swaps
     /// the results area for the ComposeView. `actingOn` is set when the user
@@ -70,6 +80,8 @@ final class SearchViewModel: ObservableObject {
     private let clipboardService: ClipboardHistoryService
     private let imageService: ImageIndexService
     private let windowService: WindowManagerService
+    private let settingsService: SystemSettingsService
+    private let folderService: FoldersService
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
     // Terminal history service intentionally not queried right now —
@@ -108,6 +120,8 @@ final class SearchViewModel: ObservableObject {
         clipboardService: ClipboardHistoryService = ClipboardHistoryService(),
         imageService: ImageIndexService = ImageIndexService(),
         windowService: WindowManagerService = WindowManagerService(),
+        settingsService: SystemSettingsService = SystemSettingsService(),
+        folderService: FoldersService = FoldersService(),
         smartService: SmartSearchService = SmartSearchService(),
         embeddingStore: EmbeddingStore = EmbeddingStore()
     ) {
@@ -125,6 +139,8 @@ final class SearchViewModel: ObservableObject {
         self.clipboardService = clipboardService
         self.imageService = imageService
         self.windowService = windowService
+        self.settingsService = settingsService
+        self.folderService = folderService
         self.smartService = smartService
         self.embeddingStore = embeddingStore
 
@@ -206,68 +222,101 @@ final class SearchViewModel: ObservableObject {
             imessageResults = []; mailResults = []; notesResults = []
             notionResults = []; linearResults = []; spotifyResults = []
             clipboardResults = []; imageResults = []; windowResults = []
+            settingsResults = []; folderResults = []
             results = []; selectedIndex = 0
             isLoading = false; isAIThinking = false; aiExplanation = nil
+            commandExclusivity = false
             return
         }
 
-        // Window-management commands resolve synchronously — flat scan of
-        // a ~60-entry alias table, sub-millisecond, no I/O. Setting these
-        // here (and re-syncing below) means "left" / "max" appear in the
-        // list the same frame the keystroke lands, before any async
-        // service responds.
-        windowResults = windowService.match(query: trimmed)
-        syncDisplayedResults(resetSelection: false)
+        // ── v0 scope ─────────────────────────────────────────────────
+        // The launcher only surfaces commands + apps + folders + settings.
+        // Content sources (messages/mail/notes/files/images/clipboard/
+        // browser history) stay in the codebase intact — services are
+        // still constructed, properties still exist — but are not queried
+        // or merged here. Flip `Self.contentSearchEnabled = true` when
+        // we're ready to bring content search back into the UI.
+        windowResults   = windowService.match(query: trimmed)
+        settingsResults = settingsService.match(query: trimmed)
+        folderResults   = folderService.match(query: trimmed)
 
+        // Apps are commands too (verb-first launching), so kick off the
+        // async app cache lookup independently. Everything else in
+        // runKeywordSearch / runSmartSearch / runAppOnly is gated below.
         currentSearchID &+= 1
         let searchID = currentSearchID
         isLoading = true
+        syncDisplayedResults(resetSelection: false)
 
-        // Static intent shortcut: queries like "open project tracker in
-        // notion" or "open tickets in linear" are routed straight to the
-        // matching service. The trigger word ("notion", "linear", etc.)
-        // is stripped along with filler words; what survives becomes the
-        // needle. Cheap + reliable — no LLM call needed for these.
-        switch Self.detectAppIntent(query: trimmed) {
-        case .notion(let needle):
-            Task { await self.runAppOnly(.notion, needle: needle, searchID: searchID) }
-            return
-        case .linear(let needle):
-            Task { await self.runAppOnly(.linear, needle: needle, searchID: searchID) }
-            return
-        case .spotify(let needle):
-            Task { await self.runAppOnly(.spotify, needle: needle, searchID: searchID) }
-            return
-        case .none:
-            break
+        Task { [searchID] in
+            let apps = await self.appService.search(query: trimmed)
+            guard searchID == self.currentSearchID else { return }
+            self.appResults = apps
+            // Clear stale content arrays so a prior query's results don't
+            // leak into the merged view if/when content is re-enabled.
+            self.browserResults = []
+            self.fileResults = []
+            self.whatsappResults = []
+            self.discordResults = []
+            self.imessageResults = []
+            self.mailResults = []
+            self.notesResults = []
+            self.notionResults = []
+            self.linearResults = []
+            self.spotifyResults = []
+            self.clipboardResults = []
+            self.imageResults = []
+            self.aiExplanation = nil
+            self.isAIThinking = false
+            self.syncDisplayedResults(resetSelection: true)
+            self.isLoading = false
         }
 
-        // Decide once at search-start whether this query is "sentence-like"
-        // enough to spend an LLM call on. The check itself is sync + cheap;
-        // availability check is sync after the first call (it caches).
-        let smart = smartService
-        // Heuristic is sync + nonisolated; key availability requires actor hop.
-        let heuristic = smart.shouldUseSmartSearch(query: trimmed)
-        // Cancel any prior in-flight smart task so we (a) don't pile up
-        // OpenAI calls (each was ~$0.001 wasted before) and (b) keep
-        // isAIThinking semantically tied to ONE active query at a time.
+        // Cancel any in-flight smart task from a previous query so it
+        // doesn't quietly land late and toggle UI state.
         inflightSmartTask?.cancel()
-        inflightSmartTask = Task {
-            var useSmart = false
-            if heuristic {
-                useSmart = await smart.isAvailable()
-            }
-            if Task.isCancelled { return }
 
-            if useSmart {
-                await self.runSmartSearch(query: trimmed, searchID: searchID)
-            } else {
-                await self.runKeywordSearch(query: trimmed, searchID: searchID)
-                self.aiExplanation = nil
-                self.isAIThinking = false
+        if Self.contentSearchEnabled {
+            // ── content search (DISABLED FOR v0) ─────────────────────
+            // Kept here verbatim so re-enabling is one flag-flip away.
+            switch Self.detectAppIntent(query: trimmed) {
+            case .notion(let needle):
+                Task { await self.runAppOnly(.notion, needle: needle, searchID: searchID) }
+                return
+            case .linear(let needle):
+                Task { await self.runAppOnly(.linear, needle: needle, searchID: searchID) }
+                return
+            case .spotify(let needle):
+                Task { await self.runAppOnly(.spotify, needle: needle, searchID: searchID) }
+                return
+            case .none:
+                break
+            }
+            let smart = smartService
+            let heuristic = smart.shouldUseSmartSearch(query: trimmed)
+            inflightSmartTask = Task {
+                var useSmart = false
+                if heuristic {
+                    useSmart = await smart.isAvailable()
+                }
+                if Task.isCancelled { return }
+                if useSmart {
+                    await self.runSmartSearch(query: trimmed, searchID: searchID)
+                } else {
+                    await self.runKeywordSearch(query: trimmed, searchID: searchID)
+                    self.aiExplanation = nil
+                    self.isAIThinking = false
+                }
             }
         }
     }
+
+    /// Feature flag — when true, the ViewModel falls back to its full
+    /// content-search fan-out (messages, mail, notes, files, images,
+    /// clipboard, browser, smart search). Currently false: v0 ships as a
+    /// pure commands launcher and content surfaces are paused until the
+    /// next UX iteration.
+    private static let contentSearchEnabled = false
 
     /// Known third-party apps we route directly when their name appears in
     /// the query. The string is the trigger keyword (must be present as a
@@ -404,6 +453,17 @@ final class SearchViewModel: ObservableObject {
         self.notionResults = nn
         self.clipboardResults = cb
         self.imageResults = ig
+
+        // Apps exclusivity arrives late because the cache lookup is async.
+        // If the typed query exactly matches an installed app name and we
+        // didn't already lock in exclusivity from a window/settings/folder
+        // hit, lock it now so content sources drop on this render.
+        if !commandExclusivity {
+            let exact = await appService.hasExactNameMatch(query: query)
+            guard searchID == currentSearchID else { return }
+            if exact { commandExclusivity = true }
+        }
+
         self.syncDisplayedResults(resetSelection: true)
         self.isLoading = false
     }
@@ -662,28 +722,19 @@ final class SearchViewModel: ObservableObject {
     /// strong matches (contact name hits at 1000, exact-match apps at 600)
     /// land at the top regardless of source.
     private func allMerged() -> [SearchResult] {
-        var merged: [SearchResult] = []
-        merged.reserveCapacity(
-            appResults.count + browserResults.count + fileResults.count
-            + whatsappResults.count + discordResults.count + imessageResults.count
-            + mailResults.count + notesResults.count + notionResults.count
-            + linearResults.count + spotifyResults.count + clipboardResults.count
+        // v0: commands-only launcher. Only the four command sources
+        // contribute to the merged view; content arrays remain populated
+        // on the model but are not surfaced here.
+        var commands: [SearchResult] = []
+        commands.reserveCapacity(
+            appResults.count + windowResults.count
+            + settingsResults.count + folderResults.count
         )
-        merged.append(contentsOf: appResults)
-        merged.append(contentsOf: browserResults)
-        merged.append(contentsOf: fileResults)
-        merged.append(contentsOf: whatsappResults)
-        merged.append(contentsOf: discordResults)
-        merged.append(contentsOf: imessageResults)
-        merged.append(contentsOf: mailResults)
-        merged.append(contentsOf: notesResults)
-        merged.append(contentsOf: notionResults)
-        merged.append(contentsOf: linearResults)
-        merged.append(contentsOf: spotifyResults)
-        merged.append(contentsOf: clipboardResults)
-        merged.append(contentsOf: imageResults)
-        merged.append(contentsOf: windowResults)
-        return merged.sorted(by: rankSort)
+        commands.append(contentsOf: appResults)
+        commands.append(contentsOf: windowResults)
+        commands.append(contentsOf: settingsResults)
+        commands.append(contentsOf: folderResults)
+        return commands.sorted(by: rankSort)
     }
 
     /// "Messages" pill: WhatsApp + iMessage + Discord, merged + rank-sorted.
@@ -1075,8 +1126,10 @@ final class SearchViewModel: ObservableObject {
         whatsappResults = []; discordResults = []
         imessageResults = []; mailResults = []; notesResults = []
         clipboardResults = []; windowResults = []
+        settingsResults = []; folderResults = []
         results = []; selectedIndex = 0
         isLoading = false; isAIThinking = false; aiExplanation = nil
+        commandExclusivity = false
         activeTab = .all
         composeState = nil; actingOn = nil
     }
