@@ -90,6 +90,11 @@ struct SearchResultRow: View {
             // 36-square the other badges occupy so row heights stay aligned.
             WindowActionPreview(action: action)
                 .frame(width: 36, height: 36)
+        case .systemAction:
+            // Power-button red tinted badge using the Source.systemAction
+            // color + the SF Symbol "power" baked into the source. No
+            // schematic preview — the symbol itself is the visual.
+            tintedBadge
         case .url:
             if isDiscord {
                 messageAvatar(platformBadge: Self.discordBadgeIcon)

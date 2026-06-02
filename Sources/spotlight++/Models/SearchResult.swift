@@ -102,6 +102,9 @@ struct SearchResult: Identifiable, Hashable {
         /// the macOS Accessibility API. Target PID is captured by
         /// SearchWindowController before the panel steals focus.
         case windowAction(WindowAction)
+        /// System-level action — sleep / shut down / restart / lock screen /
+        /// log out. Executed via NSAppleScript off the main thread.
+        case systemAction(SystemAction)
     }
 
     enum Source: String, CaseIterable {
@@ -125,6 +128,7 @@ struct SearchResult: Identifiable, Hashable {
         case images    = "Images"
         case window    = "Window"
         case settings  = "Settings"
+        case systemAction = "System"
 
         var icon: String {
             switch self {
@@ -148,6 +152,7 @@ struct SearchResult: Identifiable, Hashable {
             case .images:    return "photo.fill"
             case .window:    return "macwindow"
             case .settings:  return "gearshape.fill"
+            case .systemAction: return "power"
             }
         }
 
@@ -173,6 +178,7 @@ struct SearchResult: Identifiable, Hashable {
             case .images:    return Color(red: 0.93, green: 0.55, blue: 0.20)   // warm orange (photo)
             case .window:    return Color(red: 0.35, green: 0.55, blue: 0.75)   // calm steel-blue
             case .settings:  return Color(red: 0.55, green: 0.58, blue: 0.62)   // gunmetal gray
+            case .systemAction: return Color(red: 0.85, green: 0.32, blue: 0.30) // power-button red
             }
         }
     }

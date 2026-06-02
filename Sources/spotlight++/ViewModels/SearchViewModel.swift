@@ -41,6 +41,7 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var windowResults: [SearchResult] = []
     @Published private(set) var settingsResults: [SearchResult] = []
     @Published private(set) var folderResults: [SearchResult] = []
+    @Published private(set) var systemActionResults: [SearchResult] = []
     @Published var selectedIndex: Int = 0
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var isAIThinking: Bool = false
@@ -105,6 +106,7 @@ final class SearchViewModel: ObservableObject {
     private let windowService: WindowManagerService
     private let settingsService: SystemSettingsService
     private let folderService: FoldersService
+    private let systemActionsService: SystemActionsService
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
     // Terminal history service intentionally not queried right now —
@@ -145,6 +147,7 @@ final class SearchViewModel: ObservableObject {
         windowService: WindowManagerService = WindowManagerService(),
         settingsService: SystemSettingsService = SystemSettingsService(),
         folderService: FoldersService = FoldersService(),
+        systemActionsService: SystemActionsService = SystemActionsService(),
         smartService: SmartSearchService = SmartSearchService(),
         embeddingStore: EmbeddingStore = EmbeddingStore()
     ) {
@@ -164,6 +167,7 @@ final class SearchViewModel: ObservableObject {
         self.windowService = windowService
         self.settingsService = settingsService
         self.folderService = folderService
+        self.systemActionsService = systemActionsService
         self.smartService = smartService
         self.embeddingStore = embeddingStore
 
@@ -252,6 +256,7 @@ final class SearchViewModel: ObservableObject {
             notionResults = []; linearResults = []; spotifyResults = []
             clipboardResults = []; imageResults = []; windowResults = []
             settingsResults = []; folderResults = []
+            systemActionResults = []
             selectedIndex = 0
             isLoading = false; isAIThinking = false; aiExplanation = nil
             commandExclusivity = false
@@ -265,9 +270,20 @@ final class SearchViewModel: ObservableObject {
         // still constructed, properties still exist — but are not queried
         // or merged here. Flip `Self.contentSearchEnabled = true` when
         // we're ready to bring content search back into the UI.
-        windowResults   = windowService.match(query: trimmed)
-        settingsResults = settingsService.match(query: trimmed)
-        folderResults   = folderService.match(query: trimmed)
+        windowResults        = windowService.match(query: trimmed)
+        settingsResults      = settingsService.match(query: trimmed)
+        folderResults        = folderService.match(query: trimmed)
+        systemActionResults  = systemActionsService.match(query: trimmed)
+
+        // Clear async-source arrays SYNCHRONOUSLY so the merged view
+        // doesn't briefly show stale apps/files from a previous query
+        // before the new Task lands. Without this, count(for:) reads the
+        // new query's command results + the old query's app/file results
+        // during the ~10 ms window between performSearch returning and
+        // the Task body running — which is what produced the "All 8 /
+        // only Sleep visible" inconsistency.
+        appResults = []
+        fileResults = []
 
         // Apps are commands too (verb-first launching), so kick off the
         // async app cache lookup independently. Everything else in
@@ -775,6 +791,7 @@ final class SearchViewModel: ObservableObject {
         commands.append(contentsOf: settingsResults)
         commands.append(contentsOf: folderResults)
         commands.append(contentsOf: fileResults)
+        commands.append(contentsOf: systemActionResults)
 
         // Fuzzy suppression: if ANY non-fuzzy match exists in the merged
         // set, drop all fuzzy matches. Fuzzy is a typo-tolerant fallback
@@ -899,6 +916,14 @@ final class SearchViewModel: ObservableObject {
             // the foreground because its app was already the previously
             // frontmost.
             return windowService.execute(action)
+
+        case .systemAction(let action):
+            // NSAppleScript dispatch runs on a detached task inside the
+            // service; we return true immediately so the panel dismisses.
+            // Shut down / restart / log out trigger macOS' own 60-second
+            // confirmation dialog, so there's no extra safety prompt
+            // needed from our side.
+            return systemActionsService.execute(action)
         }
     }
 
@@ -1161,6 +1186,7 @@ final class SearchViewModel: ObservableObject {
         imessageResults = []; mailResults = []; notesResults = []
         clipboardResults = []; windowResults = []
         settingsResults = []; folderResults = []
+        systemActionResults = []
         selectedIndex = 0
         isLoading = false; isAIThinking = false; aiExplanation = nil
         commandExclusivity = false
