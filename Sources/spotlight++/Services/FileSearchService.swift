@@ -1,6 +1,13 @@
 import Foundation
 
 actor FileSearchService {
+    /// Reference to the most-recently-spawned mdfind subprocess. When a
+    /// new query arrives we terminate it before launching the next one —
+    /// otherwise N keystrokes pile up N concurrent mdfind processes, all
+    /// hammering spotlightd, and the new query has to wait through the
+    /// contention.
+    private var currentProcess: Process?
+
     /// Touch the three TCC-protected user folders so macOS fires the
     /// permission prompts at launch. Without this, our `mdfind` subprocess
     /// silently inherits a denied TCC context and returns *only* the
@@ -18,22 +25,21 @@ actor FileSearchService {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
 
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return await Task.detached(priority: .userInitiated) {
-            Self.runMDFind(query: trimmed, scopePrefix: home, limit: limit)
-        }.value
-    }
+        // Kill the prior mdfind if it's still running. Its detached
+        // consumer task will see process.isRunning == false, exit the
+        // busy-poll, return whatever it has (usually empty), and the
+        // SearchViewModel's searchID guard will drop the stale result.
+        currentProcess?.terminate()
+        currentProcess = nil
 
-    nonisolated private static func runMDFind(
-        query: String, scopePrefix: String, limit: Int
-    ) -> [SearchResult] {
-        let queryLower = query.lowercased()
+        // Spawn the new subprocess on the actor so we can track the
+        // Process reference for the next call's terminate(). The
+        // blocking read/wait runs on the detached task below.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
         // -onlyin forces a slow post-query filter (~1s); the unscoped index
         // returns in ~50ms. We filter to the user's home in Swift below.
-        process.arguments = ["-name", query]
-
+        process.arguments = ["-name", trimmed]
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
@@ -41,16 +47,33 @@ actor FileSearchService {
 
         do {
             try process.run()
-            // Hard cap so a pathological query can't stall the UI. Unscoped
-            // mdfind normally returns in ~50ms so this is well above noise.
-            let deadline = Date().addingTimeInterval(1.0)
-            while process.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.01)
-            }
-            if process.isRunning { process.terminate() }
         } catch {
             return []
         }
+        currentProcess = process
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return await Task.detached(priority: .userInitiated) {
+            Self.consume(process: process, stdout: stdout,
+                         query: trimmed, scopePrefix: home, limit: limit)
+        }.value
+    }
+
+    nonisolated private static func consume(
+        process: Process, stdout: Pipe,
+        query: String, scopePrefix: String, limit: Int
+    ) -> [SearchResult] {
+        let queryLower = query.lowercased()
+
+        // Hard cap so a pathological query can't stall the UI. Unscoped
+        // mdfind normally returns in ~50ms so this is well above noise.
+        // Loop exits early if the actor's terminate() killed us — fine,
+        // we'll return whatever partial output reached the pipe.
+        let deadline = Date().addingTimeInterval(1.0)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        if process.isRunning { process.terminate() }
 
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8) else { return [] }

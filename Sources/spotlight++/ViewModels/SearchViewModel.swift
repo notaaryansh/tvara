@@ -306,20 +306,16 @@ final class SearchViewModel: ObservableObject {
         isLoading = true
         // results is computed; no sync needed
 
+        // Apps + files run as separate Tasks so the visible result list
+        // doesn't wait for the slower one. Apps come from in-process
+        // FileManager enumeration (~5 ms); files come from an mdfind
+        // subprocess (50-500 ms). Previously both were awaited together,
+        // so every query felt as slow as mdfind. Now apps land instantly
+        // and files trail in once mdfind returns.
         Task { [searchID] in
-            // v0 launcher fan-out — apps + file/folder search via mdfind.
-            // File search is intentionally folder-only for v0 (filtered
-            // below); the underlying service returns both files and
-            // folders so re-enabling file results later is a one-line
-            // change.
-            async let appsTask  = self.appService.search(query: trimmed)
-            async let filesTask = self.fileService.search(query: trimmed)
-            let (apps, files) = await (appsTask, filesTask)
+            let apps = await self.appService.search(query: trimmed)
             guard searchID == self.currentSearchID else { return }
             self.appResults = apps
-            // FOLDER-ONLY filter for v0 — keep .folder rows, drop .file
-            // rows. Source enum already tags each result correctly.
-            self.fileResults = files.filter { $0.source == .folder }
             // Clear stale content arrays so a prior query's results don't
             // leak into the merged view if/when content is re-enabled.
             self.browserResults = []
@@ -336,7 +332,17 @@ final class SearchViewModel: ObservableObject {
             self.aiExplanation = nil
             self.isAIThinking = false
             self.selectedIndex = 0
+            // Apps landing is when the user actually sees results, so
+            // clear the loading flag here — folders trail in silently.
             self.isLoading = false
+        }
+
+        Task { [searchID] in
+            let files = await self.fileService.search(query: trimmed)
+            guard searchID == self.currentSearchID else { return }
+            // FOLDER-ONLY filter for v0 — keep .folder rows, drop .file
+            // rows. Source enum already tags each result correctly.
+            self.fileResults = files.filter { $0.source == .folder }
         }
 
         // Cancel any in-flight smart task from a previous query so it
