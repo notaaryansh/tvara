@@ -146,6 +146,7 @@ final class SearchViewModel: ObservableObject {
     private let systemActionsService: SystemActionsService
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
+    private let historyStore: SelectionHistoryStore
     // Terminal history service intentionally not queried right now —
     // suppressed per UX direction. Kept in the codebase so we can re-enable
     // by adding back the async let + a SearchTab case.
@@ -186,7 +187,8 @@ final class SearchViewModel: ObservableObject {
         folderService: FoldersService = FoldersService(),
         systemActionsService: SystemActionsService = SystemActionsService(),
         smartService: SmartSearchService = SmartSearchService(),
-        embeddingStore: EmbeddingStore = EmbeddingStore()
+        embeddingStore: EmbeddingStore = EmbeddingStore(),
+        historyStore: SelectionHistoryStore = SelectionHistoryStore()
     ) {
         self.browserService = browserService
         self.fileService = fileService
@@ -207,6 +209,7 @@ final class SearchViewModel: ObservableObject {
         self.systemActionsService = systemActionsService
         self.smartService = smartService
         self.embeddingStore = embeddingStore
+        self.historyStore = historyStore
 
         // v0 fires performSearch on EVERY keystroke — no debounce. The
         // command sources are sync alias-table loops (~5 µs each), so
@@ -536,17 +539,32 @@ final class SearchViewModel: ObservableObject {
         )
 
         guard searchID == currentSearchID else { return }
-        self.browserResults = b
-        self.fileResults = f
-        self.appResults = a
-        self.whatsappResults = w
-        self.discordResults = d
-        self.imessageResults = im
-        self.mailResults = ml
-        self.notesResults = nt
-        self.notionResults = nn
-        self.clipboardResults = cb
-        self.imageResults = ig
+
+        // Apply the frequency reranker per source array. One bulk lookup
+        // against the history store covers every candidate; the per-array
+        // apply calls are pure and reorder within each source's rank band.
+        // Blacklisted sources (window, system, images) have nil stableId
+        // and pass through unchanged.
+        //
+        // Built iteratively rather than `(b + f + … + ig).compactMap` —
+        // the 11-way array concatenation gives Swift's type checker
+        // chest pain and bloats build time noticeably.
+        var allCandidateIds: [String] = []
+        for src in [b, f, a, w, d, im, ml, nt, nn, cb, ig] {
+            for r in src { if let id = r.stableId { allCandidateIds.append(id) } }
+        }
+        let history = await historyStore.lookup(allCandidateIds)
+        self.browserResults = FrequencyReranker.apply(to: b, history: history)
+        self.fileResults = FrequencyReranker.apply(to: f, history: history)
+        self.appResults = FrequencyReranker.apply(to: a, history: history)
+        self.whatsappResults = FrequencyReranker.apply(to: w, history: history)
+        self.discordResults = FrequencyReranker.apply(to: d, history: history)
+        self.imessageResults = FrequencyReranker.apply(to: im, history: history)
+        self.mailResults = FrequencyReranker.apply(to: ml, history: history)
+        self.notesResults = FrequencyReranker.apply(to: nt, history: history)
+        self.notionResults = FrequencyReranker.apply(to: nn, history: history)
+        self.clipboardResults = FrequencyReranker.apply(to: cb, history: history)
+        self.imageResults = ig   // blacklisted from reranking; assign as-is
 
         // Apps exclusivity arrives late because the cache lookup is async.
         // If the typed query exactly matches an installed app name and we
@@ -988,8 +1006,32 @@ final class SearchViewModel: ObservableObject {
         return open(results[selectedIndex])
     }
 
+    /// Forward a selection event to the history store with the current
+    /// visible top-3 as the comparison set. No-ops when the query is too
+    /// short to be meaningful (< 2 chars) or when the chosen result is
+    /// from a blacklisted source (stableId == nil).
+    ///
+    /// Fire-and-forget Task — the open path must not block on history
+    /// I/O, and a race with the next search clearing `results` is fine
+    /// because we snapshot the visible ids before dispatching.
+    private func recordFrequencySignal(for chosen: SearchResult) {
+        guard query.trimmingCharacters(in: .whitespaces).count >= 2,
+              let chosenId = chosen.stableId else { return }
+        let topVisible = results.prefix(3).compactMap { $0.stableId }
+        let store = historyStore
+        Task { await store.recordSelection(chosenId: chosenId, visibleIds: topVisible) }
+    }
+
+    /// Clear all saved selection history. Called from the menu bar's
+    /// "Clear search history" item; takes effect on the next search.
+    func clearSelectionHistory() {
+        let store = historyStore
+        Task { await store.clear() }
+    }
+
     @discardableResult
     func open(_ result: SearchResult) -> Bool {
+        recordFrequencySignal(for: result)
         switch result.openTarget {
         case .url(let s):
             guard let url = URL(string: s) else { return false }
@@ -1136,6 +1178,10 @@ final class SearchViewModel: ObservableObject {
     /// an action intent (not a search). UI shows a context card with the
     /// result snippet so the user can see what they're acting on.
     func beginActing(on result: SearchResult) {
+        // Cmd+Enter is a real selection signal — the user picked this
+        // result out of the visible set, just to act on it instead of
+        // open it. Same input to the reranker as a plain open().
+        recordFrequencySignal(for: result)
         actingOn = result
         composeState = nil
         query = ""

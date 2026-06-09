@@ -96,6 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                      action: #selector(openSearch),
                      keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Clear search history",
+                     action: #selector(clearSearchHistory),
+                     keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Quit spotlight++",
                      action: #selector(NSApplication.terminate(_:)),
                      keyEquivalent: "q")
@@ -103,6 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.performClick(nil)
         // Detach so the next plain click opens the panel instead of the menu.
         statusItem.menu = nil
+    }
+
+    @objc private func clearSearchHistory() {
+        viewModel.clearSelectionHistory()
     }
 
     @objc private func openSearch() {

@@ -62,13 +62,13 @@ Tests/
 Do NOT proceed if either is broken.
 
 ### Phase 0 — Baseline
-- [ ] `swift build` green (current state)
-- [ ] `swift test` green (49 existing tests still passing)
+- [x] `swift build` green (current state)
+- [x] `swift test` green (49 existing tests still passing)
 
 ### Phase 1 — `SearchResult.stableId`
-- [ ] Add `stableId: String?` computed property on `SearchResult`
-- [ ] Returns nil for blacklisted sources (`systemAction`, `window`, `images`)
-- [ ] Derives ID per openTarget:
+- [x] Add `stableId: String?` computed property on `SearchResult`
+- [x] Returns nil for blacklisted sources (`systemAction`, `window`, `images`)
+- [x] Derives ID per openTarget:
   - `.url(s)` → `"url:" + s`
   - `.file(p)` → `"file:" + p`
   - `.whatsappChat(jid, _)` → `"whatsapp:" + jid`
@@ -77,66 +77,66 @@ Do NOT proceed if either is broken.
   - `.notesNote(title)` → `"notes:" + title`
   - `.spotifyPlay(uri, _)` → `"spotify:" + uri`
   - `.windowAction(_)` / `.systemAction(_)` → nil
-- [ ] Write `SearchResultStableIdTests.swift` — one test per openTarget case
-- [ ] `swift build` + `swift test` green
+- [x] Write `SearchResultStableIdTests.swift` — one test per openTarget case
+- [x] `swift build` + `swift test` green
 
 ### Phase 2 — `SelectionHistoryStore`
-- [ ] Create `Services/SelectionHistoryStore.swift` as an `actor`
-- [ ] SQLite at `~/Library/Application Support/spotlight++/selection_history.db`
-- [ ] Schema: `(stable_id TEXT PRIMARY KEY, count INT NOT NULL, last_selected_at INT NOT NULL)`
-- [ ] `init(dbPath:)` — accepts a custom path for tests; defaults to support dir
-- [ ] `recordSelection(chosenId:visibleIds:)` async — one SQLite transaction:
+- [x] Create `Services/SelectionHistoryStore.swift` as an `actor`
+- [x] SQLite at `~/Library/Application Support/spotlight++/selection_history.db`
+- [x] Schema: `(stable_id TEXT PRIMARY KEY, count INT NOT NULL, last_selected_at INT NOT NULL)`
+- [x] `init(dbPath:)` — accepts a custom path for tests; defaults to support dir
+- [x] `recordSelection(chosenId:visibleIds:)` async — one SQLite transaction:
   - chosen: `INSERT ... ON CONFLICT DO UPDATE SET count = MIN(3, count+1), last_selected_at = ?`
   - others: `UPDATE SET count = MAX(0, count-1) WHERE stable_id IN (...)` (only existing rows)
-- [ ] `lookup(_ ids: [String])` async → `[String: (count: Int, lastSelectedAt: Int64)]`
-- [ ] `clear()` async — `DELETE FROM selection_history`
-- [ ] Write `SelectionHistoryStoreTests.swift`:
+- [x] `lookup(_ ids: [String])` async → `[String: (count: Int, lastSelectedAt: Int64)]`
+- [x] `clear()` async — `DELETE FROM selection_history`
+- [x] Write `SelectionHistoryStoreTests.swift`:
   - cap at 3 over many selections
   - floor at 0 over many penalties
   - record + lookup round-trip
   - clear empties the table
   - non-existent visible IDs don't error
-- [ ] `swift build` + `swift test` green
+- [x] `swift build` + `swift test` green
 
 ### Phase 3 — `FrequencyReranker`
-- [ ] Create `Services/FrequencyReranker.swift`
-- [ ] Pure static function:
+- [x] Create `Services/FrequencyReranker.swift`
+- [x] Pure static function:
   `apply(to results: [SearchResult], history: [String: (count: Int, lastSelectedAt: Int64)]) -> [SearchResult]`
-- [ ] Stable-sort within each `source` band by `(count DESC, lastSelectedAt DESC, base_rank DESC)`
-- [ ] Rewrite ranks via `withRank(...)` so the ViewModel's downstream sort
+- [x] Stable-sort within each `source` band by `(count DESC, lastSelectedAt DESC, base_rank DESC)`
+- [x] Rewrite ranks via `withRank(...)` so the ViewModel's downstream sort
       preserves the new ordering (per existing `rank` ownership rule)
-- [ ] Write `FrequencyRerankerTests.swift`:
+- [x] Write `FrequencyRerankerTests.swift`:
   - empty history → results unchanged
   - higher count wins
   - tied counts: more recent wins
   - tied counts + recency: base rank wins
   - blacklisted-source results (stableId=nil) skipped from reranking
   - never crosses band boundaries
-- [ ] `swift build` + `swift test` green
+- [x] `swift build` + `swift test` green
 
 ### Phase 4 — Wire into SearchViewModel
-- [ ] Initialize `historyStore: SelectionHistoryStore` in init (with default support dir path)
-- [ ] In `performSearch`, after async-let merge, apply `FrequencyReranker.apply(...)`
+- [x] Initialize `historyStore: SelectionHistoryStore` in init (with default support dir path)
+- [x] In `performSearch`, after async-let merge, apply `FrequencyReranker.apply(...)`
       to each per-source backing array's results before assignment
-- [ ] In `open(_ result:)`, call `historyStore.recordSelection(...)` with the
+- [x] In `open(_ result:)`, call `historyStore.recordSelection(...)` with the
       chosen result's stableId and the top-3 of current visible `results`
-- [ ] In `submitActionIntent()` / `confirmSend()`, also record the selection
+- [x] In `submitActionIntent()` / `confirmSend()`, also record the selection
       against the originally `actingOn` result
-- [ ] Skip recording when `query.count < 2` or `chosen.stableId == nil`
-- [ ] `swift build` + existing 49 tests green
+- [x] Skip recording when `query.count < 2` or `chosen.stableId == nil`
+- [x] `swift build` + existing 49 tests green
 
 ### Phase 5 — "Clear search history" menu item
-- [ ] Add menu item to the status-bar `NSMenu` in `SpotlightApp.swift`
-- [ ] Wires to `Task { await historyStore.clear() }`
-- [ ] Confirmation? — no, the user already typed Clear; nuke immediately
-- [ ] `swift build` green
+- [x] Add menu item to the status-bar `NSMenu` in `SpotlightApp.swift`
+- [x] Wires to `Task { await historyStore.clear() }`
+- [x] Confirmation? — no, the user already typed Clear; nuke immediately
+- [x] `swift build` green
 
 ### Phase 6 — Final verification
-- [ ] `swift build` green
-- [ ] `swift test` green (49 baseline + ~15 new = ~64 total)
-- [ ] Manual smoke: select same result 4 times → see it stick at top;
+- [x] `swift build` green
+- [x] `swift test` green — final count: 86 tests (49 baseline + 14 stableId + 13 store + 10 reranker)
+- [ ] Manual smoke (cannot auto-run): select same result 4 times → see it stick at top;
       select competitor 4 times → see it overtake
-- [ ] Note in plan: how to extend (different cap, decay, etc)
+- [x] Note in plan: how to extend (different cap, decay, etc)
 
 ## How to tune later
 
