@@ -1,12 +1,54 @@
 # tvara
 
-**[trytvara.com](https://trytvara.com)** — a Spotlight-style launcher for
-macOS. Swift + SwiftUI. Floating panel summoned with `⌘K`. Searches apps,
-files, messages (WhatsApp / iMessage / Discord), mail, notes, clipboard,
-browser history, and your photos — the last via on-device CLIP semantic
-image search.
+**[trytvara.com](https://trytvara.com)**
+
+> Your Mac as one searchable surface. Stop hunting through twelve apps
+> to find one thing.
 
 ![demo](Resources/demo.gif)
+
+## A new way to navigate your Mac
+
+Your Mac is not one computer. It is twelve computers stitched together
+by ⌘Tab. Messages over here. Photos over there. Mail in its own world.
+Notes, browser, clipboard, files — every one of them a separate place
+you have to remember to look. The thing you want is always *somewhere*.
+You just have to remember which somewhere.
+
+tvara collapses all of it into one textbox.
+
+`⌘K` from anywhere. Type what you remember — not what it was called.
+The address Drish sent you last week. The photo with the dog at the
+beach. The aws cli command you copied yesterday. The Chase email about
+your card. Press `↩`. Done.
+
+It is the launcher that replaces tab-switching with typing.
+
+## What "everything" means
+
+You don't think about which app it's in. You just describe what you
+remember:
+
+- _"the message Sarah sent about the lease"_ — searches WhatsApp +
+  iMessage + Discord, deep-links to the exact thread
+- _"beautiful girl with glasses"_ — finds the photo by what's *in it*,
+  not its filename. On-device. No cloud upload, no tagging.
+- _"the chase email about my credit card last week"_ — Apple Mail with
+  natural-language time filters
+- _"that aws cli command I copied"_ — pasteboard history, semantically
+  recalled
+- _"resume from 2026"_ — files + folders, via Spotlight's own index
+- _"the transformers article I was skimming"_ — browser history across
+  Chrome, Arc, Brave, Edge
+- _"bluetooth settings"_ — every System Settings pane by name or alias
+- _"snap this window to the top right"_ — Accessibility-API window
+  management with a live snap-zone preview on the desktop
+- _"send drish a message about this paragraph"_ — capture text from any
+  app, compose, send. Without leaving the launcher.
+
+It learns from you. Pick the same result twice and it surfaces first
+next time. Press Tab to fan results into category cards if you want to
+think by source instead of by relevance.
 
 ## Install
 
@@ -15,64 +57,49 @@ image search.
 open ./tvara.app
 ```
 
-Requires macOS 14+, Swift 5.9+, and an Apple Development cert (so TCC
-grants persist across rebuilds — `security find-identity -v -p codesigning`
-and update `SIGNING_IDENTITY` in `build-app.sh`).
+Requires macOS 14+ and an Apple Development cert in Keychain (so TCC
+grants persist across rebuilds).
 
 ## Keys
 
 | Key | Action |
 | --- | --- |
-| `⌘K` | toggle panel |
+| `⌘K` | summon |
 | `↑ ↓` | move selection |
-| `↩` | open selected |
-| `⌘↩` | act on selected (compose / event) |
-| `⇥` | open category deck |
-| `↩` (in deck) | zoom into category |
-| `esc` | walk back one layer (zoom → deck → blended → clear query → hide) |
+| `↩` | open |
+| `⌘↩` | act on selected (send a message, create an event) |
+| `⇥` | category deck |
+| `↩` (in deck) | zoom into a category |
+| `esc` | back one layer (zoom → deck → blended → clear → hide) |
 
-## What it searches
+## How it works
 
-- **Apps** — every `.app` under `/Applications`, `~/Applications`, system folders
-- **Files & folders** — via `mdfind`
-- **Window management** — 14 snap actions across halves, quadrants, thirds, displays
-- **System Settings** — ~30 panes via the `x-apple.systempreferences:` URL scheme
-- **System actions** — sleep, lock, restart, shut down, log out
-- **Messages** — WhatsApp / iMessage / Discord chat history, deep-linked
-- **Mail / Notes** — Apple Mail FTS, Notes index
-- **Clipboard history** — pasteboard observer
-- **Browser history** — Chrome / Arc / Brave / Edge
-- **Images** — on-device MobileCLIP semantic search ("beautiful girl with glasses")
-- **Notion / Linear / Spotify** — when keys are configured
+Per-keystroke fan-out across local sources — files via Spotlight's own
+`mdfind`, messages via direct SQLite reads from each app's local store,
+photos via on-device MobileCLIP semantic embeddings, mail via Apple
+Mail's FTS index. Results stream into a single ranked list as each
+source returns; you see the fastest hits in milliseconds while the
+slower ones land underneath.
 
-## Architecture (brief)
+An optional natural-language planner (OpenAI today, on-device next)
+routes ambiguous queries — "address i sent drish last week" gets parsed
+into source: messages, contact: drish, time: week, search_term:
+"street address" — so the right source gets the right query without you
+thinking about it.
 
-`SpotlightApp` → `SearchWindowController` (NSPanel host + key monitor) →
-`SearchViewModel` (@MainActor, fans out per-source `Task`s on every
-keystroke) → `Services/*` (per-source searchers). Views observe the VM.
-Result rows merge into a single ranked list; Tab swaps to a category deck.
-
-```
-Sources/tvara/
-├── SpotlightApp.swift
-├── Models/        — SearchResult, WindowAction, ComposeAction
-├── Utils/         — FuzzyMatch (bounded Levenshtein)
-├── ViewModels/    — SearchViewModel
-├── Views/         — SearchView, CategoryDeckView, SearchResultRow, …
-└── Services/      — App/File/Window/Settings/Folder + content sources
-                    (Browser, Mail, Messages, Notes, Clipboard, Images, …)
-                    + SmartSearchService (OpenAI planner) + EmbeddingStore
-```
+A frequency reranker watches which results you actually pick and
+weights them up within their rank band. The launcher gets sharper
+the more you use it.
 
 ## Status
 
-v0. Active: streaming per-source results, category-deck UX, frequency
-reranker (weights selections you make). Content search uses an OpenAI
-planner today; a local-LLM planner via Ollama is being benchmarked
-(`experiments/bench_local_planner.py`).
+Active development. Some sources (Notion, Linear, Spotify) require API
+keys; others (Messages, Mail, WhatsApp, Discord, Notes, Clipboard,
+Photos) work out of the box once macOS permission prompts are granted
+on first launch. The architecture is set; the polish is in flight.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — source-available, free for
-personal / hobby / research / noncommercial-organization use. Commercial
-use reserved. Contact aaryansh@pally.com for licensing inquiries.
+[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal, hobby,
+research, and non-commercial-organization use. Commercial use reserved.
+Commercial licensing: aaryansh@pally.com.
