@@ -1,9 +1,10 @@
 # tvara
 
-A Spotlight-style launcher for macOS. Swift + SwiftUI. Floating panel
-summoned with `⌘K`. Searches apps, files, messages (WhatsApp / iMessage
-/ Discord), mail, notes, clipboard, browser history, and your photos —
-the last via on-device CLIP semantic image search.
+**[trytvara.com](https://trytvara.com)** — a Spotlight-style launcher for
+macOS. Swift + SwiftUI. Floating panel summoned with `⌘K`. Searches apps,
+files, messages (WhatsApp / iMessage / Discord), mail, notes, clipboard,
+browser history, and your photos — the last via on-device CLIP semantic
+image search.
 
 ![demo](Resources/demo.gif)
 
