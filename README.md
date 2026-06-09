@@ -10,50 +10,32 @@
 
 ## A new way to navigate your Mac
 
-Every app on your Mac is yours. Every message you've sent, every photo
-on your disk, every Mail thread, every Note, every link you copied last
-Tuesday — all of it is sitting right here. You own it.
+Your messages, photos, emails, notes, browser history, clipboard —
+they all live on this disk. To find any one of them today, you open
+the right app and use its searchbox. Twelve apps, twelve searchboxes,
+twelve different ideas of what search should do.
 
-So why does finding any of it mean knowing which app it's in?
+tvara is one searchbox across all of them.
 
-WhatsApp. iMessage. Discord. Mail. Notes. Photos. Browser history.
-Clipboard. Each one a separate little searchbox, each one with its own
-idea of what search should do, and you still have to remember which one
-of them actually holds the thing you want. Your data is yours, but
-navigating it feels like begging twelve different apps for permission
-to look inside themselves.
+`⌘K` from anywhere. Type a few words. Press `↩`.
 
-There should be one box that knows about all of it. That's why tvara
-exists.
+## What it searches
 
-`⌘K` from anywhere. Type what you remember — not what it was called.
-The address Drish sent you last week. The photo with the dog at the
-beach. The aws cli command from yesterday. The Chase email about your
-card. Press `↩`. Done.
+- Apps, files, folders
+- Messages — WhatsApp, iMessage, Discord
+- Mail
+- Notes
+- Clipboard history
+- Browser history — Chrome, Arc, Brave, Edge
+- Photos — on-device semantic image search (CLIP)
+- System Settings panes
+- Window snap actions and system actions (lock, sleep, restart)
 
-## Describe it. Find it.
-
-You stop thinking in apps. You describe what you remember, and tvara
-goes and gets it. Try:
-
-- _"the message Sarah sent about the lease"_
-- _"beautiful girl with glasses"_
-- _"the chase email about my credit card last week"_
-- _"that aws cli command I copied"_
-- _"resume from 2026"_
-- _"the transformers article I was skimming"_
-- _"bluetooth settings"_
-- _"snap this window to the top right"_
-- _"send drish a message about this paragraph"_
-
-Each one finds the thing on the first press. Across whatever app it
-happens to live in. Photos by what's *in* them, not their filenames.
-Messages by who, when, and what they were about — across WhatsApp,
-iMessage, Discord at once. Emails, notes, clipboard history, browser
-history, system settings, window layouts, all in the same textbox.
-
-It gets sharper as you use it. Open the same result twice and tvara
-remembers; the third time, it's at the top before you finish typing.
+Queries can be natural-language: _"the chase email about my credit
+card"_, _"the photo with the dog at the beach"_, _"snap this window top
+right"_. The launcher tracks which results you pick and weights them up
+within their rank band, so things you reach for often start surfacing
+higher over time.
 
 ## Install
 
