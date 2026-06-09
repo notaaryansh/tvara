@@ -165,4 +165,4 @@ on first launch. The architecture is set; the polish is in flight.
 
 [PolyForm Noncommercial 1.0.0](LICENSE). Free for personal, hobby,
 research, and non-commercial-organization use. Commercial use reserved.
-Commercial licensing: aaryansh@pally.com.
+Commercial licensing: aaryanshsahay7@gmail.com.
