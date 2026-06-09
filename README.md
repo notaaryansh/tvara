@@ -10,9 +10,9 @@
 
 ## A new way to navigate your Mac
 
-Your messages, photos, emails, notes, browser history, clipboard —
-they all live on this disk. To find any one of them today, you open
-the right app and use its searchbox. Twelve apps, twelve searchboxes,
+Your messages, photos, emails, notes, browser history, and clipboard
+all live on this disk. To find any one of them today, you open the
+right app and use its searchbox. Twelve apps, twelve searchboxes,
 twelve different ideas of what search should do.
 
 tvara is one searchbox across all of them.
@@ -22,12 +22,12 @@ tvara is one searchbox across all of them.
 ## What it searches
 
 - Apps, files, folders
-- Messages — WhatsApp, iMessage, Discord
+- Messages: WhatsApp, iMessage, Discord
 - Mail
 - Notes
 - Clipboard history
-- Browser history — Chrome, Arc, Brave, Edge
-- Photos — on-device semantic image search (CLIP)
+- Browser history: Chrome, Arc, Brave, Edge
+- Photos: on-device semantic image search (CLIP)
 - System Settings panes
 - Window snap actions and system actions (lock, sleep, restart)
 
@@ -50,15 +50,15 @@ open ./tvara.app
 **Requirements**
 
 - macOS 14 (Sonoma) or later
-- Xcode Command Line Tools — `xcode-select --install`
+- Xcode Command Line Tools (`xcode-select --install`)
 - An Apple Development cert in Keychain. The build script signs the
   bundle with it so macOS TCC grants (Accessibility, Contacts, Full
-  Disk Access, Automation) persist across rebuilds — otherwise you'd
+  Disk Access, Automation) persist across rebuilds. Otherwise you'd
   re-click those prompts every time you rebuild. List yours with
   `security find-identity -v -p codesigning` and update
   `SIGNING_IDENTITY` in `build-app.sh`.
 
-**First launch.** macOS will prompt for permissions in a batch — grant
+**First launch.** macOS will prompt for permissions in a batch. Grant
 them once and you're done. tvara summons with `⌘K` from anywhere.
 
 ## Keys
@@ -75,18 +75,18 @@ them once and you're done. tvara summons with `⌘K` from anywhere.
 
 ## How it works
 
-Per-keystroke fan-out across local sources — files via Spotlight's own
+Per-keystroke fan-out across local sources: files via Spotlight's own
 `mdfind`, messages via direct SQLite reads from each app's local store,
 photos via on-device MobileCLIP semantic embeddings, mail via Apple
 Mail's FTS index. Results stream into a single ranked list as each
-source returns; you see the fastest hits in milliseconds while the
+source returns. You see the fastest hits in milliseconds while the
 slower ones land underneath.
 
 An optional natural-language planner (OpenAI today, on-device next)
-routes ambiguous queries — "address i sent drish last week" gets parsed
-into source: messages, contact: drish, time: week, search_term:
-"street address" — so the right source gets the right query without you
-thinking about it.
+routes ambiguous queries. For example, "address i sent sam last week"
+gets parsed into source: messages, contact: sam, time: week,
+search_term: "street address", so the right source gets the right query
+without you thinking about it.
 
 A frequency reranker watches which results you actually pick and
 weights them up within their rank band. The launcher gets sharper
@@ -94,7 +94,7 @@ the more you use it.
 
 ## Privacy
 
-Your data is yours. tvara is built to keep it local by default — we
+Your data is yours. tvara is built to keep it local by default. We
 think that's table stakes for any tool that touches your messages,
 photos, and mail.
 
@@ -102,12 +102,12 @@ photos, and mail.
 (WhatsApp / iMessage / Discord), Mail, Notes, browser history,
 clipboard, and System Settings runs locally against each app's own
 database or via macOS APIs. Photo semantic search uses MobileCLIP
-running on-device via CoreML — images never leave your disk. The
+running on-device via CoreML, so images never leave your disk. The
 frequency reranker stores selection counts in
 `~/Library/Application Support/tvara/` as local SQLite, never synced.
 
 **What touches the cloud.** Two narrow paths use OpenAI today. Both are
-BYOK (bring your own key — we don't proxy, broker, or aggregate keys)
+BYOK (bring your own key; we don't proxy, broker, or aggregate keys)
 and only fire when invoked:
 
 - **Natural-language query planner** (`gpt-5.5`). When you type a query
@@ -123,9 +123,12 @@ and only fire when invoked:
 - **Discord semantic rerank** (`text-embedding-3-small`). For some
   Discord queries, tvara embeds the planner's distilled search term
   (e.g. _"street address"_) so it can rank pre-computed message
-  vectors. Never raw message content.
+  vectors. Never raw message content. *This is a placeholder.* We're
+  training a small on-device embedding model to replace OpenAI on this
+  path; once it ships, even this distilled phrase stops leaving your
+  Mac.
 
-Without an API key configured, none of these fire — natural-language
+Without an API key configured, none of these fire. Natural-language
 planning silently falls back to literal keyword matching against your
 local data. The cloud paths are an *opt-in upgrade*, not a requirement.
 
@@ -139,7 +142,7 @@ an on-device LLM. Honest tradeoffs today:
   near-100% for OpenAI.
 - Apple's `FoundationModels` framework is the cleanest path forward
   (on-device, free, ~30-80ms) but requires macOS 26.
-- Performance varies meaningfully by system — Apple Silicon vs Intel,
+- Performance varies meaningfully by system: Apple Silicon vs Intel,
   RAM headroom, which model you've pulled.
 
 So today: OpenAI is the default with BYOK. Anthropic/Claude as another
@@ -160,6 +163,6 @@ on first launch. The architecture is set; the polish is in flight.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal, hobby,
+[PolyForm Noncommercial 1.0.0](LICENSE). Free for personal, hobby,
 research, and non-commercial-organization use. Commercial use reserved.
 Commercial licensing: aaryansh@pally.com.
