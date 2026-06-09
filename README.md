@@ -10,20 +10,26 @@
 
 ## A new way to navigate your Mac
 
-Your Mac is not one computer. It is twelve computers stitched together
-by ⌘Tab. Messages over here. Photos over there. Mail in its own world.
-Notes, browser, clipboard, files — every one of them a separate place
-you have to remember to look. The thing you want is always *somewhere*.
-You just have to remember which somewhere.
+Every app on your Mac is yours. Every message you've sent, every photo
+on your disk, every Mail thread, every Note, every link you copied last
+Tuesday — all of it is sitting right here. You own it.
 
-tvara collapses all of it into one textbox.
+So why does finding any of it mean knowing which app it's in?
+
+WhatsApp. iMessage. Discord. Mail. Notes. Photos. Browser history.
+Clipboard. Each one a separate little searchbox, each one with its own
+idea of what search should do, and you still have to remember which one
+of them actually holds the thing you want. Your data is yours, but
+navigating it feels like begging twelve different apps for permission
+to look inside themselves.
+
+There should be one box that knows about all of it. That's why tvara
+exists.
 
 `⌘K` from anywhere. Type what you remember — not what it was called.
 The address Drish sent you last week. The photo with the dog at the
-beach. The aws cli command you copied yesterday. The Chase email about
-your card. Press `↩`. Done.
-
-It is the launcher that replaces tab-switching with typing.
+beach. The aws cli command from yesterday. The Chase email about your
+card. Press `↩`. Done.
 
 ## Describe it. Find it.
 
