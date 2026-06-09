@@ -4,7 +4,9 @@
 
 > A new way to navigate your Mac.
 
-![demo](Resources/demo.gif)
+<p align="center">
+  <img src="Resources/demo.gif" alt="tvara demo" width="100%" />
+</p>
 
 ## A new way to navigate your Mac
 
