@@ -43,7 +43,7 @@ A signed binary is coming to **[trytvara.com](https://trytvara.com)**.
 For now, build from source:
 
 ```bash
-./build-app.sh
+./scripts/build-app.sh
 open ./tvara.app
 ```
 
@@ -56,7 +56,7 @@ open ./tvara.app
   Disk Access, Automation) persist across rebuilds. Otherwise you'd
   re-click those prompts every time you rebuild. List yours with
   `security find-identity -v -p codesigning` and update
-  `SIGNING_IDENTITY` in `build-app.sh`.
+  `SIGNING_IDENTITY` in `scripts/build-app.sh`.
 
 **First launch.** macOS will prompt for permissions in a batch. Grant
 them once and you're done. tvara summons with `⌘K` from anywhere.

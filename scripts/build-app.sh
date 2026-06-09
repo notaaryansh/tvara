@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_NAME="tvara"
 BUILD_CONFIG="${BUILD_CONFIG:-release}"
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="${ROOT}/${APP_NAME}.app"
 CONTENTS="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS}/MacOS"

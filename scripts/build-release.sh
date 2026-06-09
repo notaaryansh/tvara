@@ -9,7 +9,7 @@ BUNDLE_ID="com.aaryansh.tvara"
 DEV_ID_APP="Developer ID Application: <YOUR NAME> (<TEAMID>)"  # CHANGE THIS
 NOTARY_PROFILE="AC_NOTARY"                                     # set via notarytool store-credentials
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="${ROOT}/${APP_NAME}.app"
 CONTENTS="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS}/MacOS"
