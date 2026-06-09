@@ -135,19 +135,40 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
                     self.viewModel.cancelCompose()
                     return nil
                 }
-                self.hide()
+                // Hierarchical layer-pop: zoomed → deck → blended →
+                // clear query → dismiss. The VM decides; controller only
+                // acts on the .dismiss outcome.
+                switch self.viewModel.handleEscape() {
+                case .handled: break
+                case .dismiss: self.hide()
+                }
                 return nil
             case kVK_DownArrow:
-                self.viewModel.moveSelection(by: 1)
+                if self.viewModel.viewMode == .deck {
+                    self.viewModel.moveCardSelection(by: 1)
+                } else {
+                    self.viewModel.moveSelection(by: 1)
+                }
                 return nil
             case kVK_UpArrow:
-                self.viewModel.moveSelection(by: -1)
+                if self.viewModel.viewMode == .deck {
+                    self.viewModel.moveCardSelection(by: -1)
+                } else {
+                    self.viewModel.moveSelection(by: -1)
+                }
                 return nil
             case kVK_Return, kVK_ANSI_KeypadEnter:
                 // In acting mode the typed text is an action intent, not a
                 // search query — submit it to the planner.
                 if self.viewModel.actingOn != nil {
                     self.viewModel.submitActionIntent()
+                    return nil
+                }
+                // Enter on a category card zooms into that category's full
+                // list. From the zoomed list and from the blended list,
+                // Enter opens the selected result as usual.
+                if self.viewModel.viewMode == .deck {
+                    self.viewModel.zoomSelectedCard()
                     return nil
                 }
                 // ⌘↩ on a selected result enters acting mode instead of
@@ -162,8 +183,11 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
                 if self.viewModel.openSelected() { self.hide() }
                 return nil
             case kVK_Tab:
-                let forward = !event.modifierFlags.contains(.shift)
-                self.viewModel.cycleTab(forward: forward)
+                // Tab now toggles the category deck instead of cycling
+                // the (now-removed) pill strip. Shift-Tab is reserved
+                // for future "back to deck from zoomed" once we want
+                // a distinct gesture; right now Esc does that job.
+                self.viewModel.toggleDeck()
                 return nil
             default:
                 return event

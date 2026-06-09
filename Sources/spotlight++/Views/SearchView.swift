@@ -35,15 +35,12 @@ struct SearchView: View {
                 actingFooter
             } else if hasQuery {
                 Divider().opacity(0.25)
-                TabStripView(viewModel: viewModel)
                 if viewModel.isAIThinking || viewModel.aiExplanation != nil {
                     aiBanner
                 }
-                if !viewModel.results.isEmpty {
-                    Divider().opacity(0.20)
-                    resultsList
-                } else if !viewModel.isLoading && !viewModel.isAIThinking {
-                    emptyState
+                resultsArea
+                if viewModel.viewMode != .blended || !viewModel.categoryCards.isEmpty {
+                    statusFooter
                 }
             }
         }
@@ -76,7 +73,9 @@ struct SearchView: View {
     private enum BubbleMode: String, Hashable {
         case empty            // no query typed
         case pending          // query typed, no results yet
-        case results          // results visible
+        case results          // blended list visible
+        case deck             // category deck visible
+        case zoomed           // single-category zoomed list
         case acting           // acting mode footer
         case composing        // compose panel
     }
@@ -85,8 +84,13 @@ struct SearchView: View {
         if viewModel.composeState != nil { return .composing }
         if viewModel.actingOn != nil     { return .acting }
         if !hasQuery                     { return .empty }
-        if viewModel.results.isEmpty     { return .pending }
-        return .results
+        switch viewModel.viewMode {
+        case .deck:    return .deck
+        case .zoomed:  return .zoomed
+        case .blended:
+            if viewModel.results.isEmpty { return .pending }
+            return .results
+        }
     }
 
     /// True only when the user has typed enough characters for the
@@ -204,6 +208,73 @@ struct SearchView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    /// Three discrete renderings driven by viewModel.viewMode. Wrapped in
+    /// a single Group so the surrounding bubble layout doesn't change as
+    /// modes switch — only the inner content does.
+    @ViewBuilder
+    private var resultsArea: some View {
+        switch viewModel.viewMode {
+        case .deck:
+            CategoryDeckView(viewModel: viewModel)
+        case .zoomed:
+            zoomedHeader
+            if !viewModel.results.isEmpty {
+                resultsList
+            } else if !viewModel.isLoading && !viewModel.isAIThinking {
+                emptyState
+            }
+        case .blended:
+            if !viewModel.results.isEmpty {
+                resultsList
+            } else if !viewModel.isLoading && !viewModel.isAIThinking {
+                emptyState
+            }
+        }
+    }
+
+    /// Slim header when zoomed into a single category. Mirrors the
+    /// active card so the user sees "I'm inside Messages" with the same
+    /// icon + tint they tapped on in the deck.
+    private var zoomedHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: viewModel.activeTab.icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(viewModel.activeTab.label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+            Text("\(viewModel.results.count)")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 7)
+        .background(Color.white.opacity(0.03))
+    }
+
+    /// Bottom status bar — shows the relevant keyboard hint for the
+    /// current view mode. Replaces the old "⇥ to switch" tab-strip text.
+    private var statusFooter: some View {
+        HStack(spacing: 12) {
+            switch viewModel.viewMode {
+            case .blended:
+                shortcutHint(key: "⇥", label: "categories")
+            case .deck:
+                shortcutHint(key: "↩", label: "open")
+                shortcutHint(key: "esc", label: "back")
+            case .zoomed:
+                shortcutHint(key: "↩", label: "open")
+                shortcutHint(key: "esc", label: "back to categories")
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.02))
     }
 
     private var resultsList: some View {

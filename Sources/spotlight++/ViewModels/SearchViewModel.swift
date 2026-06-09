@@ -7,8 +7,10 @@ enum SearchTab: String, CaseIterable, Hashable {
     case messages   // iMessage + WhatsApp + Discord merged
     case mail
     case apps
+    case files
     case images
     case clipboard
+    case notes
 
     var label: String {
         switch self {
@@ -16,10 +18,34 @@ enum SearchTab: String, CaseIterable, Hashable {
         case .messages:  return "Messages"
         case .mail:      return "Mail"
         case .apps:      return "Apps"
+        case .files:     return "Files"
         case .images:    return "Images"
         case .clipboard: return "Clipboard"
+        case .notes:     return "Notes"
         }
     }
+
+    var icon: String {
+        switch self {
+        case .all:       return "square.grid.2x2.fill"
+        case .messages:  return "bubble.left.and.bubble.right.fill"
+        case .mail:      return "envelope.fill"
+        case .apps:      return "app.fill"
+        case .files:     return "folder.fill"
+        case .images:    return "photo.fill"
+        case .clipboard: return "doc.on.clipboard.fill"
+        case .notes:     return "note.text"
+        }
+    }
+}
+
+/// Top-level UI mode for the results area. Replaces the old pill-strip
+/// navigation — categories are reached via Tab (deck) → Enter (zoom), not
+/// by clicking a pill.
+enum ResultsViewMode: Equatable {
+    case blended       // single ranked list of everything
+    case deck          // category cards
+    case zoomed        // single category's full list (uses activeTab)
 }
 
 @MainActor
@@ -50,6 +76,13 @@ final class SearchViewModel: ObservableObject {
         didSet { if oldValue != activeTab { selectedIndex = 0 } }
     }
 
+    /// Top-level UI mode: blended list → category deck (Tab) → zoomed
+    /// category list (Enter on a card). Esc walks back up the stack.
+    @Published var viewMode: ResultsViewMode = .blended
+    /// Cursor within the category-deck view. Independent of `selectedIndex`
+    /// so leaving and re-entering the deck doesn't reset list selection.
+    @Published var selectedCardIndex: Int = 0
+
     /// Single source of truth for what the result list shows. Computed
     /// fresh from the @Published backing arrays + activeTab on every
     /// access — there's intentionally no cached `results` field, because
@@ -66,11 +99,15 @@ final class SearchViewModel: ObservableObject {
         case .mail:
             return mailResults
         case .apps:
-            return (appResults + fileResults).sorted(by: rankSort)
+            return appResults.sorted(by: rankSort)
+        case .files:
+            return fileResults.sorted(by: rankSort)
         case .images:
             return imageResults
         case .clipboard:
             return clipboardResults
+        case .notes:
+            return notesResults
         }
     }
 
@@ -239,9 +276,11 @@ final class SearchViewModel: ObservableObject {
         case .messages:
             return min(messagesMerged().count, Self.messagesTabResultCap)
         case .mail:      return mailResults.count
-        case .apps:      return appResults.count + fileResults.count
+        case .apps:      return appResults.count
+        case .files:     return fileResults.count
         case .images:    return imageResults.count
         case .clipboard: return clipboardResults.count
+        case .notes:     return notesResults.count
         }
     }
 
@@ -270,7 +309,9 @@ final class SearchViewModel: ObservableObject {
             clipboardResults = []; imageResults = []; windowResults = []
             settingsResults = []; folderResults = []
             systemActionResults = []
-            selectedIndex = 0
+            selectedIndex = 0; selectedCardIndex = 0
+            viewMode = .blended
+            activeTab = .all
             isLoading = false; isAIThinking = false; aiExplanation = nil
             commandExclusivity = false
             return
@@ -288,61 +329,41 @@ final class SearchViewModel: ObservableObject {
         folderResults        = folderService.match(query: trimmed)
         systemActionResults  = systemActionsService.match(query: trimmed)
 
-        // Clear async-source arrays SYNCHRONOUSLY so the merged view
-        // doesn't briefly show stale apps/files from a previous query
-        // before the new Task lands. Without this, count(for:) reads the
-        // new query's command results + the old query's app/file results
-        // during the ~10 ms window between performSearch returning and
-        // the Task body running — which is what produced the "All 8 /
-        // only Sleep visible" inconsistency.
-        appResults = []
-        fileResults = []
+        // Clear EVERY @Published source array SYNCHRONOUSLY so the merged
+        // view doesn't briefly show stale results from the previous query
+        // while new ones stream in. Each per-source Task below overwrites
+        // its own array as it lands; nothing else mutates the others, so
+        // the streaming wave can't accidentally clobber a sibling.
+        appResults = []; fileResults = []; browserResults = []
+        whatsappResults = []; discordResults = []; imessageResults = []
+        mailResults = []; notesResults = []; notionResults = []
+        linearResults = []; spotifyResults = []; clipboardResults = []
+        imageResults = []
+        selectedIndex = 0
+        selectedCardIndex = 0
+        aiExplanation = nil
 
-        // Apps are commands too (verb-first launching), so kick off the
-        // async app cache lookup independently. Everything else in
-        // runKeywordSearch / runSmartSearch / runAppOnly is gated below.
         currentSearchID &+= 1
         let searchID = currentSearchID
         isLoading = true
-        // results is computed; no sync needed
 
-        // Apps + files run as separate Tasks so the visible result list
-        // doesn't wait for the slower one. Apps come from in-process
-        // FileManager enumeration (~5 ms); files come from an mdfind
-        // subprocess (50-500 ms). Previously both were awaited together,
-        // so every query felt as slow as mdfind. Now apps land instantly
-        // and files trail in once mdfind returns.
-        Task { [searchID] in
-            let apps = await self.appService.search(query: trimmed)
-            guard searchID == self.currentSearchID else { return }
-            self.appResults = apps
-            // Clear stale content arrays so a prior query's results don't
-            // leak into the merged view if/when content is re-enabled.
-            self.browserResults = []
-            self.whatsappResults = []
-            self.discordResults = []
-            self.imessageResults = []
-            self.mailResults = []
-            self.notesResults = []
-            self.notionResults = []
-            self.linearResults = []
-            self.spotifyResults = []
-            self.clipboardResults = []
-            self.imageResults = []
-            self.aiExplanation = nil
-            self.isAIThinking = false
-            self.selectedIndex = 0
-            // Apps landing is when the user actually sees results, so
-            // clear the loading flag here — folders trail in silently.
-            self.isLoading = false
-        }
-
-        Task { [searchID] in
-            let files = await self.fileService.search(query: trimmed)
-            guard searchID == self.currentSearchID else { return }
-            // FOLDER-ONLY filter for v0 — keep .folder rows, drop .file
-            // rows. Source enum already tags each result correctly.
-            self.fileResults = files.filter { $0.source == .folder }
+        // v0 commands-only path: apps + folder-filtered files only. Same
+        // shape as before — apps come from in-process FileManager (~5 ms),
+        // files come from mdfind (50-500 ms) but are filtered to folder
+        // rows so the deck card is small + scannable.
+        if !Self.contentSearchEnabled {
+            Task { [searchID] in
+                let apps = await self.appService.search(query: trimmed)
+                guard searchID == self.currentSearchID else { return }
+                self.appResults = apps
+                self.isAIThinking = false
+                self.isLoading = false
+            }
+            Task { [searchID] in
+                let files = await self.fileService.search(query: trimmed)
+                guard searchID == self.currentSearchID else { return }
+                self.fileResults = files.filter { $0.source == .folder }
+            }
         }
 
         // Cancel any in-flight smart task from a previous query so it
@@ -386,10 +407,10 @@ final class SearchViewModel: ObservableObject {
 
     /// Feature flag — when true, the ViewModel falls back to its full
     /// content-search fan-out (messages, mail, notes, files, images,
-    /// clipboard, browser, smart search). Currently false: v0 ships as a
-    /// pure commands launcher and content surfaces are paused until the
-    /// next UX iteration.
-    private static let contentSearchEnabled = false
+    /// clipboard, browser, smart search). Flipped back to true for the
+    /// category-deck UX experiment so we can see how mixed-source results
+    /// look in the new deck/zoom layout.
+    private static let contentSearchEnabled = true
 
     /// Known third-party apps we route directly when their name appears in
     /// the query. The string is the trigger keyword (must be present as a
@@ -795,32 +816,141 @@ final class SearchViewModel: ObservableObject {
     /// strong matches (contact name hits at 1000, exact-match apps at 600)
     /// land at the top regardless of source.
     private func allMerged() -> [SearchResult] {
-        // v0: commands + apps + (filtered) file-search folders. Other
-        // content sources remain populated on the model but are not
-        // surfaced. fileResults is pre-filtered to .folder rows only in
-        // performSearch so this stays a "command-shaped" merge.
-        var commands: [SearchResult] = []
-        commands.reserveCapacity(
-            appResults.count + windowResults.count
-            + settingsResults.count + folderResults.count
-            + fileResults.count
-        )
-        commands.append(contentsOf: appResults)
-        commands.append(contentsOf: windowResults)
-        commands.append(contentsOf: settingsResults)
-        commands.append(contentsOf: folderResults)
-        commands.append(contentsOf: fileResults)
-        commands.append(contentsOf: systemActionResults)
+        // Commands + apps + every content source we surface. Used by both
+        // the blended-list view (current main UX) and the count badge on
+        // the All deck card. Terminal results are intentionally excluded.
+        var all: [SearchResult] = []
+        all.append(contentsOf: appResults)
+        all.append(contentsOf: windowResults)
+        all.append(contentsOf: settingsResults)
+        all.append(contentsOf: folderResults)
+        all.append(contentsOf: fileResults)
+        all.append(contentsOf: systemActionResults)
+        if Self.contentSearchEnabled {
+            all.append(contentsOf: whatsappResults)
+            all.append(contentsOf: imessageResults)
+            all.append(contentsOf: discordResults)
+            all.append(contentsOf: mailResults)
+            all.append(contentsOf: notesResults)
+            all.append(contentsOf: notionResults)
+            all.append(contentsOf: linearResults)
+            all.append(contentsOf: spotifyResults)
+            all.append(contentsOf: clipboardResults)
+            all.append(contentsOf: imageResults)
+            all.append(contentsOf: browserResults)
+        }
 
         // Fuzzy suppression: if ANY non-fuzzy match exists in the merged
         // set, drop all fuzzy matches. Fuzzy is a typo-tolerant fallback
         // — it should only be visible when nothing else matched at all.
         // Keeps "shirim" from listing Siri alongside the real shirim
         // folder.
-        if commands.contains(where: { !$0.isFuzzyMatch }) {
-            commands.removeAll(where: { $0.isFuzzyMatch })
+        if all.contains(where: { !$0.isFuzzyMatch }) {
+            all.removeAll(where: { $0.isFuzzyMatch })
         }
-        return commands.sorted(by: rankSort)
+        return all.sorted(by: rankSort)
+    }
+
+    // MARK: - Category deck
+
+    /// One card per non-empty content category. Always-on commands
+    /// (apps, window snaps, system settings, etc.) stay folded into the
+    /// blended list and don't get their own card — the deck is about
+    /// surfacing the *content* dimensions of a query (your messages,
+    /// your files, your photos), not the launcher commands.
+    struct CategoryCard: Identifiable, Hashable {
+        let tab: SearchTab
+        let count: Int
+        let topPreview: SearchResult?
+        var id: SearchTab { tab }
+    }
+
+    var categoryCards: [CategoryCard] {
+        var cards: [CategoryCard] = []
+        func add(_ tab: SearchTab, _ results: [SearchResult]) {
+            guard !results.isEmpty else { return }
+            cards.append(CategoryCard(
+                tab: tab,
+                count: results.count,
+                topPreview: results.sorted(by: rankSort).first
+            ))
+        }
+        add(.apps, appResults)
+        add(.files, fileResults)
+        let msgs = messagesMerged()
+        if !msgs.isEmpty {
+            cards.append(CategoryCard(
+                tab: .messages, count: msgs.count,
+                topPreview: msgs.first
+            ))
+        }
+        add(.mail, mailResults)
+        add(.notes, notesResults)
+        add(.images, imageResults)
+        add(.clipboard, clipboardResults)
+        return cards
+    }
+
+    // MARK: - Mode transitions (Tab / Esc / Enter from deck)
+
+    /// Tab toggles the deck. From inside a zoomed category Tab steps back
+    /// up to the deck so the user can pick another category without
+    /// having to Esc-then-Tab.
+    func toggleDeck() {
+        guard !categoryCards.isEmpty else { return }
+        switch viewMode {
+        case .blended:
+            viewMode = .deck
+            selectedCardIndex = 0
+        case .deck:
+            viewMode = .blended
+        case .zoomed:
+            viewMode = .deck
+        }
+    }
+
+    /// Zoom into the currently-highlighted card. No-op when the cursor
+    /// is out of bounds (e.g. the card under it just disappeared because
+    /// results re-ranked while the deck was open).
+    func zoomSelectedCard() {
+        let cards = categoryCards
+        guard cards.indices.contains(selectedCardIndex) else { return }
+        activeTab = cards[selectedCardIndex].tab
+        viewMode = .zoomed
+        selectedIndex = 0
+    }
+
+    /// Vertical arrow navigation within the deck.
+    func moveCardSelection(by delta: Int) {
+        let cards = categoryCards
+        guard !cards.isEmpty else { return }
+        selectedCardIndex = min(max(selectedCardIndex + delta, 0), cards.count - 1)
+    }
+
+    /// Whether Esc was consumed by a layer-pop. False means the window
+    /// controller should dismiss the panel (we ran out of layers).
+    enum EscapeOutcome { case handled, dismiss }
+
+    /// Hierarchical Esc:
+    ///   zoomed → deck
+    ///   deck → blended
+    ///   blended + query → clear query
+    ///   blended + empty → dismiss
+    func handleEscape() -> EscapeOutcome {
+        switch viewMode {
+        case .zoomed:
+            viewMode = .deck
+            return .handled
+        case .deck:
+            viewMode = .blended
+            return .handled
+        case .blended:
+            if !query.isEmpty {
+                query = ""
+                return .handled
+            }
+            return .dismiss
+        }
     }
 
     /// "Messages" pill: WhatsApp + iMessage + Discord, merged + rank-sorted.
@@ -1206,7 +1336,8 @@ final class SearchViewModel: ObservableObject {
         clipboardResults = []; windowResults = []
         settingsResults = []; folderResults = []
         systemActionResults = []
-        selectedIndex = 0
+        selectedIndex = 0; selectedCardIndex = 0
+        viewMode = .blended
         isLoading = false; isAIThinking = false; aiExplanation = nil
         commandExclusivity = false
         activeTab = .all
