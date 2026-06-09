@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Bulk-embed Discord messages from spotlight++'s discord_index.db.
+Bulk-embed Discord messages from tvara's discord_index.db.
 
-Reads:  ~/Library/Application Support/spotlight++/discord_index.db (messages table)
-Writes: ~/Library/Application Support/spotlight++/embeddings.db
+Reads:  ~/Library/Application Support/tvara/discord_index.db (messages table)
+Writes: ~/Library/Application Support/tvara/embeddings.db
 
 For the demo we embed Discord only. Other sources can be added by extending
 SOURCES below. Rows already embedded with the same model are skipped, so
@@ -30,7 +30,7 @@ import urllib.request
 import ssl
 from pathlib import Path
 
-SUPPORT_DIR = Path.home() / "Library/Application Support/spotlight++"
+SUPPORT_DIR = Path.home() / "Library/Application Support/tvara"
 SOURCE_DB   = SUPPORT_DIR / "discord_index.db"
 TARGET_DB   = SUPPORT_DIR / "embeddings.db"
 PROJECT_ENV = Path(__file__).resolve().parent.parent / ".env"

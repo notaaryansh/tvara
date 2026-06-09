@@ -16,7 +16,7 @@ private let SQLITE_TRANSIENT_SP = unsafeBitCast(-1, to: sqlite3_destructor_type.
 actor SpotifyService {
     private static let appPath  = "/Applications/Spotify.app"
     private static let dbPath   = NSHomeDirectory()
-        + "/Library/Application Support/spotlight++/spotify_index.db"
+        + "/Library/Application Support/tvara/spotify_index.db"
     private static let syncScript = "scripts/sync_spotify.py"
 
     private var db: OpaquePointer?
@@ -164,9 +164,9 @@ actor SpotifyService {
         let candidates = [
             FileManager.default.currentDirectoryPath + "/" + syncScript,
             Bundle.main.bundleURL.deletingLastPathComponent().path + "/" + syncScript,
-            // ~/Documents/GitHub/spotlight++/scripts/sync_spotify.py — known
+            // ~/Documents/GitHub/tvara/scripts/sync_spotify.py — known
             // dev path; remove for distributable builds.
-            NSHomeDirectory() + "/Documents/GitHub/spotlight++/" + syncScript,
+            NSHomeDirectory() + "/Documents/GitHub/tvara/" + syncScript,
         ]
         for c in candidates where FileManager.default.fileExists(atPath: c) {
             return c

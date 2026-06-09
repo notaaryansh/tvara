@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = item.button {
             button.image = NSImage(
                 systemSymbolName: "magnifyingglass",
-                accessibilityDescription: "spotlight++"
+                accessibilityDescription: "tvara"
             )
             button.image?.isTemplate = true
             button.target = self
@@ -65,12 +65,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Open spotlight++",
+        menu.addItem(withTitle: "Open tvara",
                      action: #selector(openSearch),
                      keyEquivalent: "k")
         menu.items.last?.keyEquivalentModifierMask = [.command]
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Quit spotlight++",
+        menu.addItem(withTitle: "Quit tvara",
                      action: #selector(NSApplication.terminate(_:)),
                      keyEquivalent: "q")
         // Attach via menu property only on demand so left-click can do its
@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showStatusMenu() {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Open spotlight++  ⌘K",
+        menu.addItem(withTitle: "Open tvara  ⌘K",
                      action: #selector(openSearch),
                      keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                      action: #selector(clearSearchHistory),
                      keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Quit spotlight++",
+        menu.addItem(withTitle: "Quit tvara",
                      action: #selector(NSApplication.terminate(_:)),
                      keyEquivalent: "q")
         statusItem.menu = menu
@@ -125,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
         appMenu.addItem(
-            withTitle: "Quit spotlight++",
+            withTitle: "Quit tvara",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )

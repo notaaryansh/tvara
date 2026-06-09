@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "spotlight++",
+    name: "tvara",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "spotlight++",
-            path: "Sources/spotlight++",
+            name: "tvara",
+            path: "Sources/tvara",
             resources: [
                 // CLIP tokenizer assets + MobileCLIP-S2 CoreML models.
                 // Bundle.module reaches into here at runtime via
@@ -19,9 +19,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "spotlight++Tests",
-            dependencies: ["spotlight++"],
-            path: "Tests/spotlight++Tests"
+            name: "tvaraTests",
+            dependencies: ["tvara"],
+            path: "Tests/tvaraTests"
         )
     ]
 )

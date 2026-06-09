@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DEST="${ROOT}/Sources/spotlight++/Resources/Models"
+DEST="${ROOT}/Sources/tvara/Resources/Models"
 mkdir -p "${DEST}"
 
 REPO="https://huggingface.co/apple/coreml-mobileclip/resolve/main"

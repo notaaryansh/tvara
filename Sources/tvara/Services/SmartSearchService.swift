@@ -6,7 +6,7 @@ import Foundation
 /// person is named, (d) any time bound. The plan then drives our existing
 /// per-source services — the LLM never sees user data, only the query.
 ///
-/// API key is read from `~/Library/Application Support/spotlight++/openai_key.txt`.
+/// API key is read from `~/Library/Application Support/tvara/openai_key.txt`.
 /// If the file is missing or empty, smart search is disabled and the
 /// caller falls back to keyword search.
 actor SmartSearchService {
@@ -25,11 +25,11 @@ actor SmartSearchService {
             // Project-root .env files (when running from `swift run`):
             FileManager.default.currentDirectoryPath + "/.env",
             // Beside the .app bundle (when running the bundled app from
-            // ~/Documents/GitHub/spotlight++/spotlight++.app):
+            // ~/Documents/GitHub/tvara/tvara.app):
             Bundle.main.bundleURL.deletingLastPathComponent().path + "/.env",
             // Application Support — the macOS-native location:
-            home + "/Library/Application Support/spotlight++/.env",
-            home + "/Library/Application Support/spotlight++/openai_key.txt",
+            home + "/Library/Application Support/tvara/.env",
+            home + "/Library/Application Support/tvara/openai_key.txt",
             // Home dir fallback:
             home + "/.env",
         ]
@@ -37,7 +37,7 @@ actor SmartSearchService {
 
     init() {
         let supportDir = NSHomeDirectory()
-            + "/Library/Application Support/spotlight++"
+            + "/Library/Application Support/tvara"
         try? FileManager.default.createDirectory(
             atPath: supportDir, withIntermediateDirectories: true
         )
@@ -377,7 +377,7 @@ actor SmartSearchService {
     // MARK: - Prompt
 
     private static let systemPrompt = """
-    You are a query planner for spotlight++, a personal Mac search app. The user types natural-language queries and you decide which of their local data sources to search and what the actual search terms should be.
+    You are a query planner for tvara, a personal Mac search app. The user types natural-language queries and you decide which of their local data sources to search and what the actual search terms should be.
 
     Available sources:
     - "messages": chat messages from WhatsApp, iMessage, Discord

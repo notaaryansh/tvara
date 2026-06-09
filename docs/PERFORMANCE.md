@@ -1,4 +1,4 @@
-# spotlight++ performance
+# tvara performance
 
 Latency, indexing throughput, storage cost, and steady-state characteristics
 of every search source. Numbers are measured on Apple Silicon (M-series, 16-32 GB RAM,
@@ -50,7 +50,7 @@ mid-sweep without waiting for the whole pass.
 
 ### Storage
 
-- SQLite: `~/Library/Application Support/spotlight++/images.db`
+- SQLite: `~/Library/Application Support/tvara/images.db`
 - Per row: 2KB embedding blob + ~512B labels JSON + ~50B OCR median + ~16B path. **~3 KB / image**.
 - 7K images → ~30 MB DB. 50K → ~150 MB. Linear in corpus size.
 
@@ -99,7 +99,7 @@ Re-walks the mailbox tree but skips unchanged messages by ROWID.
 
 ### Storage
 
-`~/Library/Application Support/spotlight++/mail_index.db`
+`~/Library/Application Support/tvara/mail_index.db`
 - Per message: ~1-5 KB after FTS5 compression
 - 100K messages ≈ 200-400 MB
 
@@ -134,7 +134,7 @@ contains a lot of non-message data.
 
 ### Storage
 
-`~/Library/Application Support/spotlight++/discord_index.db`
+`~/Library/Application Support/tvara/discord_index.db`
 - Tables: `users(id, username, avatar_data)`, `channels(id, name, ...)`,
   `messages(id, author_id, content, timestamp)`.
 - Per message: ~200 B + average content size. 50K messages ≈ 50 MB.
@@ -220,7 +220,7 @@ Total in the fan-out: **~80-150 ms** across all four browsers (parallel).
 
 ### Storage
 
-`~/Library/Application Support/spotlight++/browser_caches/` — periodic
+`~/Library/Application Support/tvara/browser_caches/` — periodic
 copies of the source DBs to dodge locks while browsers run. ~20-80 MB.
 
 ---
@@ -301,7 +301,7 @@ Otherwise the keyword fan-out runs directly.
 
 | | Idle RAM |
 |---|---|
-| spotlight++ baseline (Swift runtime + SwiftUI window) | ~80 MB |
+| tvara baseline (Swift runtime + SwiftUI window) | ~80 MB |
 | Image search (CLIP models loaded) | +220 MB |
 | Browser DB connections (×4) | +30 MB |
 | Mail FTS5 + Discord SQLite | +40 MB |
@@ -316,7 +316,7 @@ re-load lazily on next query (~500-1000 ms cold).
 
 | | Size |
 |---|---|
-| Binary (`spotlight++`) | ~3 MB |
+| Binary (`tvara`) | ~3 MB |
 | MobileCLIP-S2 models (both encoders) | ~190 MB |
 | CLIP tokenizer (vocab + merges) | ~1.4 MB |
 | **App bundle total** | **~195 MB** |

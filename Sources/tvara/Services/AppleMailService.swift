@@ -35,7 +35,7 @@ actor AppleMailService {
             return contents.contains { $0.hasPrefix("V") && $0.count <= 4 }
         } ?? candidates[0]
 
-        let supportDir = home + "/Library/Application Support/spotlight++"
+        let supportDir = home + "/Library/Application Support/tvara"
         try? FileManager.default.createDirectory(
             atPath: supportDir, withIntermediateDirectories: true
         )

@@ -65,7 +65,7 @@ final class WindowSnapOverlayController {
         } else {
             panel.setFrame(rect, display: false)
             panel.orderFront(nil)
-            // Re-assert layering each time: spotlight++ panel sits at
+            // Re-assert layering each time: tvara panel sits at
             // .floating, our overlay sits one level below so window-stack
             // order is always overlay-under-panel.
         }
@@ -88,7 +88,7 @@ final class WindowSnapOverlayController {
         panel.hasShadow = false
         panel.ignoresMouseEvents = true
         panel.isMovable = false
-        // One level below the spotlight++ panel (.floating == 3) so the
+        // One level below the tvara panel (.floating == 3) so the
         // overlay never covers the launcher itself, but still floats over
         // every other app's normal-level windows.
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)

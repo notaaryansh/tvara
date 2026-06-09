@@ -19,7 +19,7 @@ actor DiscordService {
             + "/Library/Application Support/discord/Cache/Cache_Data"
 
         let supportDir = NSHomeDirectory()
-            + "/Library/Application Support/spotlight++"
+            + "/Library/Application Support/tvara"
         try? FileManager.default.createDirectory(
             atPath: supportDir, withIntermediateDirectories: true
         )

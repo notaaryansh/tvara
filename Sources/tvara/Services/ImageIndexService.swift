@@ -44,7 +44,7 @@ actor ImageIndexService {
 
     init(scanRoots: [URL]? = nil) {
         let home = NSHomeDirectory()
-        let supportDir = home + "/Library/Application Support/spotlight++"
+        let supportDir = home + "/Library/Application Support/tvara"
         try? FileManager.default.createDirectory(
             atPath: supportDir, withIntermediateDirectories: true
         )

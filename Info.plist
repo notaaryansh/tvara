@@ -5,15 +5,15 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>spotlight++</string>
+    <string>tvara</string>
     <key>CFBundleIdentifier</key>
-    <string>com.aaryansh.spotlightplusplus</string>
+    <string>com.aaryansh.tvara</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>spotlight++</string>
+    <string>tvara</string>
     <key>CFBundleDisplayName</key>
-    <string>spotlight++</string>
+    <string>tvara</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -27,19 +27,19 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSDesktopFolderUsageDescription</key>
-    <string>spotlight++ searches your Desktop so you can find files by name.</string>
+    <string>tvara searches your Desktop so you can find files by name.</string>
     <key>NSDocumentsFolderUsageDescription</key>
-    <string>spotlight++ searches your Documents so you can find files by name.</string>
+    <string>tvara searches your Documents so you can find files by name.</string>
     <key>NSDownloadsFolderUsageDescription</key>
-    <string>spotlight++ searches your Downloads so you can find files by name.</string>
+    <string>tvara searches your Downloads so you can find files by name.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>spotlight++ uses AppleScript to send iMessages from the compose panel.</string>
+    <string>tvara uses AppleScript to send iMessages from the compose panel.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
-    <string>spotlight++ creates calendar events from the compose panel.</string>
+    <string>tvara creates calendar events from the compose panel.</string>
     <key>NSCalendarsUsageDescription</key>
-    <string>spotlight++ creates calendar events from the compose panel.</string>
+    <string>tvara creates calendar events from the compose panel.</string>
     <key>NSContactsUsageDescription</key>
-    <string>spotlight++ looks up phone numbers and emails so it can show iMessage chat shortcuts for people in your address book.</string>
+    <string>tvara looks up phone numbers and emails so it can show iMessage chat shortcuts for people in your address book.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key>

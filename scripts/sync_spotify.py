@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 Sync Spotify library (playlists / albums / artists) from the desktop app's
-local LevelDB cache into spotlight++'s spotify_index.db.
+local LevelDB cache into tvara's spotify_index.db.
 
 Reads:
     ~/Library/Application Support/Spotify/PersistentCache/Users/<user>-user/primary.ldb
 
 Writes:
-    ~/Library/Application Support/spotlight++/spotify_index.db
+    ~/Library/Application Support/tvara/spotify_index.db
 
 Schema:
     items(kind TEXT, id TEXT, name TEXT, art_hash TEXT, indexed_at INT,
@@ -40,7 +40,7 @@ except ImportError:
         "install via: pip install dfindexeddb"
     )
 
-SUPPORT_DIR = Path.home() / "Library/Application Support/spotlight++"
+SUPPORT_DIR = Path.home() / "Library/Application Support/tvara"
 TARGET_DB   = SUPPORT_DIR / "spotify_index.db"
 OVERRIDES   = SUPPORT_DIR / "spotify_playlists.txt"
 
@@ -240,7 +240,7 @@ def fetch_oembed_art_hash(kind: str, sid: str, name: str) -> str | None:
     api = "https://open.spotify.com/oembed?" + urllib.parse.urlencode({"url": web_url})
     try:
         req = urllib.request.Request(api, headers={
-            "User-Agent": "spotlight++/0.1 (sync_spotify.py)"
+            "User-Agent": "tvara/0.1 (sync_spotify.py)"
         })
         with urllib.request.urlopen(req, timeout=6, context=ssl_ctx()) as r:
             data = json.loads(r.read())

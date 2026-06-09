@@ -20,7 +20,7 @@ actor LinearService {
     /// or:
     ///   linear://acme/team/ENG/active
     private static let urlConfigPath = NSHomeDirectory()
-        + "/Library/Application Support/spotlight++/linear_issues_url.txt"
+        + "/Library/Application Support/tvara/linear_issues_url.txt"
 
     /// No-op — kept for parity with other services so wiring stays uniform.
     func warmCache() async {}

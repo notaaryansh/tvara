@@ -75,7 +75,7 @@ enum CalendarEventSaver {
 
     private static func requestAccess(store: EKEventStore) async throws {
         // macOS 14+: requestFullAccessToEvents. Older fallback omitted —
-        // spotlight++ targets macOS 14 minimum (per Info.plist).
+        // tvara targets macOS 14 minimum (per Info.plist).
         let granted: Bool = await withCheckedContinuation { cont in
             store.requestFullAccessToEvents { granted, _ in
                 cont.resume(returning: granted)

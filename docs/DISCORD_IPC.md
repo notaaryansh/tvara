@@ -47,11 +47,11 @@ Practically: pushes resolved messages from ~44% → near 100%.
 This is a one-time setup the user does, not us:
 
 1. Go to https://discord.com/developers/applications, click
-   **New Application**, name it `spotlight++`, copy the **Application ID**
+   **New Application**, name it `tvara`, copy the **Application ID**
    (also called Client ID).
 2. We embed that Client ID as a constant in `DiscordIPCService.swift`.
 3. On first launch after the integration ships, Discord pops a dialog
-   inside its own window: *"spotlight++ wants to read your servers and
+   inside its own window: *"tvara wants to read your servers and
    channels — Allow?"* The user clicks Allow once. Discord remembers
    forever.
 
@@ -164,8 +164,8 @@ Response: `data.channels: [{id, name, type, position}, ...]`.
 - On Discord IPC ready: enumerate guilds → enumerate channels per guild
   → bulk UPSERT into our SQLite (the existing conditional upsert handles
   merging with cache-derived rows safely).
-- Re-sync triggered when: (a) spotlight++ launches, (b) Discord launches
-  while spotlight++ is open (detect via `NSWorkspace`
+- Re-sync triggered when: (a) tvara launches, (b) Discord launches
+  while tvara is open (detect via `NSWorkspace`
   `didLaunchApplicationNotification`), (c) every 5 minutes while Discord
   is running.
 - If IPC isn't available (Discord not running, socket missing), silently
@@ -208,7 +208,7 @@ Build it when either of these is true:
 
 1. Discord coverage <44% becomes painful enough that the user explicitly
    notices missing context on common queries.
-2. We want to ship spotlight++ to other users — at that point the
+2. We want to ship tvara to other users — at that point the
    per-machine cache-fill-up variation makes Discord coverage feel
    unreliable, and IPC normalizes the experience.
 

@@ -1,4 +1,4 @@
-# spotlight++
+# tvara
 
 A Spotlight-style launcher for macOS. Swift + SwiftUI. Floating panel
 summoned with `⌘K`. Searches apps, files, messages (WhatsApp / iMessage
@@ -11,7 +11,7 @@ the last via on-device CLIP semantic image search.
 
 ```bash
 ./build-app.sh
-open ./spotlight++.app
+open ./tvara.app
 ```
 
 Requires macOS 14+, Swift 5.9+, and an Apple Development cert (so TCC
@@ -52,7 +52,7 @@ keystroke) → `Services/*` (per-source searchers). Views observe the VM.
 Result rows merge into a single ranked list; Tab swaps to a category deck.
 
 ```
-Sources/spotlight++/
+Sources/tvara/
 ├── SpotlightApp.swift
 ├── Models/        — SearchResult, WindowAction, ComposeAction
 ├── Utils/         — FuzzyMatch (bounded Levenshtein)

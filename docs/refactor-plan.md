@@ -18,7 +18,7 @@ registry. No more god-object edits, no more cross-folder feature scatter.
 ## Target shape — landed
 
 ```
-Sources/spotlight++/
+Sources/tvara/
   Actions/
     ComposeVerb.swift              <- protocol every verb conforms to
     ComposeVerbRegistry.swift      <- single source of truth (static array)
@@ -35,7 +35,7 @@ Sources/spotlight++/
       MessageComposeView.swift     <- extracted from ComposeView.swift
       IMessageSender.swift         <- moved from Services/
 Tests/
-  spotlight++Tests/
+  tvaraTests/
     FuzzyMatchTests.swift                  (12 tests — pre-existing behavior)
     SystemActionsServiceTests.swift        (15 tests — pre-existing behavior)
     ComposeVerbRegistryTests.swift         (8 tests — new shape)
@@ -47,7 +47,7 @@ Tests/
 
 ### Phase 0 — Safety baseline
 - [x] Verify clean build (`swift build`) — baseline confirmed
-- [x] Add `Tests/spotlight++Tests/` target to `Package.swift`
+- [x] Add `Tests/tvaraTests/` target to `Package.swift`
 - [x] Write `FuzzyMatchTests.swift` — 12 tests pin current behavior
 - [x] Write `SystemActionsServiceTests.swift` — 15 tests pin destructive-action safety
 - [x] `swift test` green (27 tests)
@@ -106,7 +106,7 @@ Reminders.
 ### 1. Create the folder
 
 ```
-Sources/spotlight++/Actions/Reminder/
+Sources/tvara/Actions/Reminder/
 ```
 
 ### 2. Define the payload — `ReminderPayload.swift`
@@ -215,7 +215,7 @@ moved off `confirmSend`, the switch can become a single
 `try await ComposeVerbRegistry.verb(for: state)?.execute(state: state)`
 call and step 9 will disappear.
 
-### 10. Tests — `Tests/spotlight++Tests/ReminderVerbTests.swift`
+### 10. Tests — `Tests/tvaraTests/ReminderVerbTests.swift`
 
 Mirror `CalendarVerbTests.swift` — `handles`, payload equality, stable id.
 

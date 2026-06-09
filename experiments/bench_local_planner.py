@@ -2,7 +2,7 @@
 """
 Local-LLM planner benchmark.
 
-Drives Ollama with the real spotlight++ planner system prompt + 5 synthetic
+Drives Ollama with the real tvara planner system prompt + 5 synthetic
 queries that mirror the actual planner workload. Measures latency, JSON
 validity, and source-classification accuracy per model.
 
@@ -41,9 +41,9 @@ DEFAULT_MODELS = [
     "gemma2:2b",
 ]
 
-# Lifted verbatim from Sources/spotlight++/Services/SmartSearchService.swift
+# Lifted verbatim from Sources/tvara/Services/SmartSearchService.swift
 # so the local model is doing the EXACT same task as the OpenAI planner.
-SYSTEM_PROMPT = """You are a query planner for spotlight++, a personal Mac search app. The user types natural-language queries and you decide which of their local data sources to search and what the actual search terms should be.
+SYSTEM_PROMPT = """You are a query planner for tvara, a personal Mac search app. The user types natural-language queries and you decide which of their local data sources to search and what the actual search terms should be.
 
 Available sources:
 - "messages": chat messages from WhatsApp, iMessage, Discord

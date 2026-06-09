@@ -1,7 +1,7 @@
 import Foundation
 
 /// Send an iMessage by driving Messages.app via AppleScript. Requires the
-/// user to grant Automation permission for spotlight++ → Messages on first
+/// user to grant Automation permission for tvara → Messages on first
 /// use (one-time TCC prompt). Throws on script failure or compile error.
 ///
 /// Handle should be the iMessage-recognised identifier: phone like

@@ -10,7 +10,7 @@ private let SQLITE_TRANSIENT_CB = unsafeBitCast(-1, to: sqlite3_destructor_type.
 /// by password managers like 1Password / Bitwarden / etc), and caps entry
 /// size at 100KB. Deduplicates against the immediately previous entry.
 ///
-/// spotlight++ already runs persistently (it owns the global hotkey), so
+/// tvara already runs persistently (it owns the global hotkey), so
 /// the polling loop has the right lifetime — runs whether or not the
 /// search panel is visible.
 actor ClipboardHistoryService {
@@ -26,7 +26,7 @@ actor ClipboardHistoryService {
 
     init() {
         let supportDir = NSHomeDirectory()
-            + "/Library/Application Support/spotlight++"
+            + "/Library/Application Support/tvara"
         try? FileManager.default.createDirectory(
             atPath: supportDir, withIntermediateDirectories: true
         )

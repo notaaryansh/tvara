@@ -11,7 +11,7 @@ preferences fade as you change habits.
 ## Behaviour (locked-in spec)
 
 - **Storage**: one row per `stable_result_id`. SQLite at
-  `~/Library/Application Support/spotlight++/selection_history.db`.
+  `~/Library/Application Support/tvara/selection_history.db`.
 - **On Enter / Cmd+Enter (with query >= 2 chars)**:
   - chosen result: `count = min(3, count + 1)`, `last_selected_at = now`
   - top-3 visible results (excluding chosen): `count = max(0, count - 1)`
@@ -38,7 +38,7 @@ preferences fade as you change habits.
 ## Target shape
 
 ```
-Sources/spotlight++/
+Sources/tvara/
   Models/
     SearchResult.swift               # add `stableId` computed property
   Services/
@@ -49,7 +49,7 @@ Sources/spotlight++/
                                      # apply reranker after search merge
   SpotlightApp.swift                 # menu item: "Clear search history"
 Tests/
-  spotlight++Tests/
+  tvaraTests/
     SearchResultStableIdTests.swift  # per openTarget + blacklist behaviour
     SelectionHistoryStoreTests.swift # cap=3 / floor=0 / record / lookup / clear
     FrequencyRerankerTests.swift     # ordering, band preservation, recency tiebreak
@@ -82,7 +82,7 @@ Do NOT proceed if either is broken.
 
 ### Phase 2 — `SelectionHistoryStore`
 - [x] Create `Services/SelectionHistoryStore.swift` as an `actor`
-- [x] SQLite at `~/Library/Application Support/spotlight++/selection_history.db`
+- [x] SQLite at `~/Library/Application Support/tvara/selection_history.db`
 - [x] Schema: `(stable_id TEXT PRIMARY KEY, count INT NOT NULL, last_selected_at INT NOT NULL)`
 - [x] `init(dbPath:)` — accepts a custom path for tests; defaults to support dir
 - [x] `recordSelection(chosenId:visibleIds:)` async — one SQLite transaction:

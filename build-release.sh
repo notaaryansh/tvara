@@ -4,8 +4,8 @@ set -euo pipefail
 # Release build + sign + notarize + DMG.
 # Prereqs: see ../office-hours design doc Step 0.
 
-APP_NAME="spotlight++"
-BUNDLE_ID="com.aaryansh.spotlightplusplus"
+APP_NAME="tvara"
+BUNDLE_ID="com.aaryansh.tvara"
 DEV_ID_APP="Developer ID Application: <YOUR NAME> (<TEAMID>)"  # CHANGE THIS
 NOTARY_PROFILE="AC_NOTARY"                                     # set via notarytool store-credentials
 

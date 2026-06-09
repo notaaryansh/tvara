@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="spotlight++"
+APP_NAME="tvara"
 BUILD_CONFIG="${BUILD_CONFIG:-release}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="${ROOT}/${APP_NAME}.app"
@@ -78,7 +78,7 @@ for nested in "${MACOS_DIR}"/*.bundle; do
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.aaryanshsahay.spotlight-plus-plus.resources.${bundle_name}</string>
+    <string>com.aaryanshsahay.tvara.resources.${bundle_name}</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleName</key>

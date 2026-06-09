@@ -9,7 +9,7 @@
 //   swift experiments/bench_planner.swift
 //
 // Loads the API key the same way the app does (project root .env, then
-// ~/Library/Application Support/spotlight++/.env). The key value is
+// ~/Library/Application Support/tvara/.env). The key value is
 // never printed.
 //
 // We can't bench Apple's Foundation Models here because this host is on
@@ -115,8 +115,8 @@ func loadKey() -> String? {
     let home = NSHomeDirectory()
     let candidates = [
         FileManager.default.currentDirectoryPath + "/.env",
-        home + "/Library/Application Support/spotlight++/.env",
-        home + "/Library/Application Support/spotlight++/openai_key.txt",
+        home + "/Library/Application Support/tvara/.env",
+        home + "/Library/Application Support/tvara/openai_key.txt",
         home + "/.env",
     ]
     for path in candidates {

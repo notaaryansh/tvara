@@ -39,7 +39,7 @@ actor SelectionHistoryStore {
     private var db: OpaquePointer?
     private var ready = false
 
-    /// Default path: `~/Library/Application Support/spotlight++/selection_history.db`.
+    /// Default path: `~/Library/Application Support/tvara/selection_history.db`.
     /// Tests pass a custom path (typically an `NSTemporaryDirectory` file)
     /// so they don't pollute the user's real history.
     init(dbPath: String? = nil) {
@@ -47,7 +47,7 @@ actor SelectionHistoryStore {
             self.dbPath = dbPath
         } else {
             let home = NSHomeDirectory()
-            let supportDir = home + "/Library/Application Support/spotlight++"
+            let supportDir = home + "/Library/Application Support/tvara"
             try? FileManager.default.createDirectory(
                 atPath: supportDir, withIntermediateDirectories: true
             )

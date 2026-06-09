@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sync Notion page metadata into spotlight++'s notion_index.db.
+Sync Notion page metadata into tvara's notion_index.db.
 
 For v1 we index page title + URL + parent-breadcrumb only (no page body,
 no database rows). The Swift NotionService does fuzzy title matching and
@@ -8,16 +8,16 @@ returns SearchResults that deep-link into the Notion app.
 
 Auth: reads an integration token from one of these locations (first hit wins):
     $NOTION_TOKEN env var
-    ~/Library/Application Support/spotlight++/notion_token.txt
-    ~/Library/Application Support/spotlight++/.env  (NOTION_TOKEN=...)
+    ~/Library/Application Support/tvara/notion_token.txt
+    ~/Library/Application Support/tvara/.env  (NOTION_TOKEN=...)
     <repo>/.env                                     (NOTION_TOKEN=...)
 
 Setup once on the user's side:
     1. In Notion: Settings → Connections → Develop or manage integrations
-    2. + New integration → name it (e.g. "spotlight++") → copy the secret
+    2. + New integration → name it (e.g. "tvara") → copy the secret
     3. Paste the secret into the token file above
     4. Share the workspaces/pages you want indexed WITH the integration
-       (top-level page → Share menu → Connections → spotlight++)
+       (top-level page → Share menu → Connections → tvara)
     5. Run this script: python3 scripts/sync_notion.py
 
 Re-run after creating/renaming pages to refresh the index. Soon we'll
@@ -34,7 +34,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-SUPPORT_DIR = Path.home() / "Library/Application Support/spotlight++"
+SUPPORT_DIR = Path.home() / "Library/Application Support/tvara"
 TARGET_DB   = SUPPORT_DIR / "notion_index.db"
 PROJECT_ENV = Path(__file__).resolve().parent.parent / ".env"
 TOKEN_FILE  = SUPPORT_DIR / "notion_token.txt"
