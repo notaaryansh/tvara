@@ -92,6 +92,65 @@ A frequency reranker watches which results you actually pick and
 weights them up within their rank band. The launcher gets sharper
 the more you use it.
 
+## Privacy
+
+Your data is yours. tvara is built to keep it local by default — we
+think that's table stakes for any tool that touches your messages,
+photos, and mail.
+
+**What stays on your Mac.** All search across apps, files, messages
+(WhatsApp / iMessage / Discord), Mail, Notes, browser history,
+clipboard, and System Settings runs locally against each app's own
+database or via macOS APIs. Photo semantic search uses MobileCLIP
+running on-device via CoreML — images never leave your disk. The
+frequency reranker stores selection counts in
+`~/Library/Application Support/tvara/` as local SQLite, never synced.
+
+**What touches the cloud.** Two narrow paths use OpenAI today. Both are
+BYOK (bring your own key — we don't proxy, broker, or aggregate keys)
+and only fire when invoked:
+
+- **Natural-language query planner** (`gpt-5.5`). When you type a query
+  like _"the chase email about my credit card last week,"_ tvara sends
+  *just the query string* to OpenAI to parse out source + contact +
+  keywords + time. The structured plan comes back, and tvara searches
+  your local data. Your actual messages, files, photos, and results
+  never leave the machine.
+- **Compose-action planner** (`gpt-5.5`). When you `⌘↩` on a result to
+  draft a message or calendar event, tvara sends your action intent
+  plus the snippet you're acting on (capped at 800 characters). Nothing
+  else.
+- **Discord semantic rerank** (`text-embedding-3-small`). For some
+  Discord queries, tvara embeds the planner's distilled search term
+  (e.g. _"street address"_) so it can rank pre-computed message
+  vectors. Never raw message content.
+
+Without an API key configured, none of these fire — natural-language
+planning silently falls back to literal keyword matching against your
+local data. The cloud paths are an *opt-in upgrade*, not a requirement.
+
+**Local models, eventually.** The plan is to swap the cloud planner for
+an on-device LLM. Honest tradeoffs today:
+
+- Local 3B models via Ollama work, but our benchmarks
+  (`experiments/bench_local_planner.py`) put them at ~3s per query vs
+  OpenAI's ~500ms-1.5s.
+- Smaller models classify the source correctly ~80% of the time vs
+  near-100% for OpenAI.
+- Apple's `FoundationModels` framework is the cleanest path forward
+  (on-device, free, ~30-80ms) but requires macOS 26.
+- Performance varies meaningfully by system — Apple Silicon vs Intel,
+  RAM headroom, which model you've pulled.
+
+So today: OpenAI is the default with BYOK. Anthropic/Claude as another
+BYOK option is on the list. Local-LLM swap will ship as an opt-in once
+the latency story is good enough on enough machines.
+
+**Telemetry.** None. tvara doesn't phone home, doesn't track usage,
+doesn't ping for updates, doesn't ship analytics. The only outbound
+network calls are the OpenAI ones above, and only when you've provided
+a key.
+
 ## Status
 
 Active development. Some sources (Notion, Linear, Spotify) require API
