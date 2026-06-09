@@ -213,6 +213,13 @@ platform-agnostic.
 - **Calculator and unit conversion** detection for `2+2`-shape queries.
 - **Custom user-config shortcuts** (project folders, URL aliases) loaded
   from `~/.spotlight++/aliases.toml`.
+- **Continuous image indexing.** Today the image pipeline (OCR + Vision
+  labels + MobileCLIP embeddings) sweeps once at launch. Needed:
+  `FSEventStream` watcher on each scan root so new files index on arrival,
+  orphan-pruning of rows whose paths no longer exist on disk,
+  user-configurable scan roots (Settings UI), and a manual "Reindex"
+  command. The infra (SQLite schema, FTS5 mirror, RRF fusion) is already
+  in place — only the pipeline-around-it is v0.
 
 ## Requirements
 
