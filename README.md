@@ -2,8 +2,7 @@
 
 **[trytvara.com](https://trytvara.com)**
 
-> Your Mac as one searchable surface. Stop hunting through twelve apps
-> to find one thing.
+> A new way to navigate your Mac.
 
 ![demo](Resources/demo.gif)
 
@@ -24,41 +23,53 @@ your card. Press `↩`. Done.
 
 It is the launcher that replaces tab-switching with typing.
 
-## What "everything" means
+## Describe it. Find it.
 
-You don't think about which app it's in. You just describe what you
-remember:
+You stop thinking in apps. You describe what you remember, and tvara
+goes and gets it. Try:
 
-- _"the message Sarah sent about the lease"_ — searches WhatsApp +
-  iMessage + Discord, deep-links to the exact thread
-- _"beautiful girl with glasses"_ — finds the photo by what's *in it*,
-  not its filename. On-device. No cloud upload, no tagging.
-- _"the chase email about my credit card last week"_ — Apple Mail with
-  natural-language time filters
-- _"that aws cli command I copied"_ — pasteboard history, semantically
-  recalled
-- _"resume from 2026"_ — files + folders, via Spotlight's own index
-- _"the transformers article I was skimming"_ — browser history across
-  Chrome, Arc, Brave, Edge
-- _"bluetooth settings"_ — every System Settings pane by name or alias
-- _"snap this window to the top right"_ — Accessibility-API window
-  management with a live snap-zone preview on the desktop
-- _"send drish a message about this paragraph"_ — capture text from any
-  app, compose, send. Without leaving the launcher.
+- _"the message Sarah sent about the lease"_
+- _"beautiful girl with glasses"_
+- _"the chase email about my credit card last week"_
+- _"that aws cli command I copied"_
+- _"resume from 2026"_
+- _"the transformers article I was skimming"_
+- _"bluetooth settings"_
+- _"snap this window to the top right"_
+- _"send drish a message about this paragraph"_
 
-It learns from you. Pick the same result twice and it surfaces first
-next time. Press Tab to fan results into category cards if you want to
-think by source instead of by relevance.
+Each one finds the thing on the first press. Across whatever app it
+happens to live in. Photos by what's *in* them, not their filenames.
+Messages by who, when, and what they were about — across WhatsApp,
+iMessage, Discord at once. Emails, notes, clipboard history, browser
+history, system settings, window layouts, all in the same textbox.
+
+It gets sharper as you use it. Open the same result twice and tvara
+remembers; the third time, it's at the top before you finish typing.
 
 ## Install
+
+A signed binary is coming to **[trytvara.com](https://trytvara.com)**.
+For now, build from source:
 
 ```bash
 ./build-app.sh
 open ./tvara.app
 ```
 
-Requires macOS 14+ and an Apple Development cert in Keychain (so TCC
-grants persist across rebuilds).
+**Requirements**
+
+- macOS 14 (Sonoma) or later
+- Xcode Command Line Tools — `xcode-select --install`
+- An Apple Development cert in Keychain. The build script signs the
+  bundle with it so macOS TCC grants (Accessibility, Contacts, Full
+  Disk Access, Automation) persist across rebuilds — otherwise you'd
+  re-click those prompts every time you rebuild. List yours with
+  `security find-identity -v -p codesigning` and update
+  `SIGNING_IDENTITY` in `build-app.sh`.
+
+**First launch.** macOS will prompt for permissions in a batch — grant
+them once and you're done. tvara summons with `⌘K` from anywhere.
 
 ## Keys
 
