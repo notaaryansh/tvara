@@ -1,0 +1,59 @@
+→ openai: loaded key (len=164)   model=gpt-5.5   reasoning=low
+  [openai/msg-short] run 1: 3873 ms ✓
+  [openai/msg-short] run 2: 2738 ms ✓
+  [openai/msg-short] run 3: 2355 ms ✓
+  [openai/msg-short] avg 2989 ms (min 2355, max 3873)
+
+  [openai/msg-summarize] run 1: 3585 ms ✓
+  [openai/msg-summarize] run 2: 3376 ms ✓
+  [openai/msg-summarize] run 3: 2909 ms ✓
+  [openai/msg-summarize] avg 3290 ms (min 2909, max 3585)
+
+  [openai/evt-simple] run 1: 3447 ms ✓
+  [openai/evt-simple] run 2: 3369 ms ✓
+  [openai/evt-simple] run 3: 3366 ms ✓
+  [openai/evt-simple] avg 3394 ms (min 3366, max 3447)
+
+  [openai/evt-with-attendees] run 1: 4718 ms ✓
+  [openai/evt-with-attendees] run 2: 5281 ms ✓
+  [openai/evt-with-attendees] run 3: 5061 ms ✓
+  [openai/evt-with-attendees] avg 5020 ms (min 4718, max 5281)
+
+  [openai/msg-long-source] run 1: 4931 ms ✓
+  [openai/msg-long-source] run 2: 5178 ms ✓
+  [openai/msg-long-source] run 3: 5588 ms ✓
+  [openai/msg-long-source] avg 5233 ms (min 4931, max 5588)
+
+
+→ fm: SystemLanguageModel.available — running on-device bench
+  [fm/msg-short] run 1: 3055 ms ✓
+  [fm/msg-short] run 2: 867 ms ✓
+  [fm/msg-short] run 3: 889 ms ✓
+  [fm/msg-short] avg 1604 ms (min 867, max 3055)
+
+  [fm/msg-summarize] run 1: 1543 ms ✓
+  [fm/msg-summarize] run 2: 1635 ms ✓
+  [fm/msg-summarize] run 3: 1578 ms ✓
+  [fm/msg-summarize] avg 1585 ms (min 1543, max 1635)
+
+  [fm/evt-simple] run 1: 1599 ms ✓
+  [fm/evt-simple] run 2: 1473 ms ✓
+  [fm/evt-simple] run 3: 1569 ms ✓
+  [fm/evt-simple] avg 1547 ms (min 1473, max 1599)
+
+  [fm/evt-with-attendees] run 1: 1662 ms ✓
+  [fm/evt-with-attendees] run 2: 1800 ms ✓
+  [fm/evt-with-attendees] run 3: 1471 ms ✓
+  [fm/evt-with-attendees] avg 1644 ms (min 1471, max 1800)
+
+  [fm/msg-long-source] run 1: 1789 ms ~
+  [fm/msg-long-source] run 2: 2072 ms ✓
+  [fm/msg-long-source] run 3: 1487 ms ✓
+  [fm/msg-long-source] avg 1783 ms (min 1487, max 2072)
+
+
+══ SUMMARY ══
+  [openai/gpt-5.5] n=15  avg 3985 ms  p50 3585 ms  p95 5588 ms
+         type-accuracy 100% (15/15)  shape-accuracy 100% (15/15)  failures 0
+  [apple/foundationmodels] n=15  avg 1633 ms  p50 1578 ms  p95 3055 ms
+         type-accuracy 100% (15/15)  shape-accuracy 93% (14/15)  failures 0

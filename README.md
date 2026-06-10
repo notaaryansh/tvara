@@ -140,8 +140,20 @@ an on-device LLM. Honest tradeoffs today:
   OpenAI's ~500ms-1.5s.
 - Smaller models classify the source correctly ~80% of the time vs
   near-100% for OpenAI.
-- Apple's `FoundationModels` framework is the cleanest path forward
-  (on-device, free, ~30-80ms) but requires macOS 26.
+- Apple's `FoundationModels` framework (on-device, free, no network)
+  is the cleanest path forward. We benched it against OpenAI on the
+  compose-action planner (`experiments/bench_planner.swift`, 5 samples
+  × 3 runs on an Apple Silicon Mac running macOS 26.5):
+  - **openai/gpt-5.5 (low reasoning):** avg 3985 ms, p50 3585 ms, p95
+    5588 ms — 100% type-accuracy, 100% shape-accuracy.
+  - **apple/foundationmodels (on-device):** avg 1633 ms, p50 1578 ms,
+    p95 3055 ms — 100% type-accuracy, 93% shape-accuracy (one missing
+    field on a long input; expected to pin at 100% once we move to the
+    `@Generable` structured-output path).
+
+  Roughly 2.4× faster than OpenAI on average, free, works offline.
+  Requires macOS 26 + Apple Intelligence enabled, so it can't be the
+  default yet — but it's the obvious win once we can.
 - Performance varies meaningfully by system: Apple Silicon vs Intel,
   RAM headroom, which model you've pulled.
 
