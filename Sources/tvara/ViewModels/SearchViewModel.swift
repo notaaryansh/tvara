@@ -432,6 +432,15 @@ final class SearchViewModel: ObservableObject {
             let smart = smartService
             let heuristic = smart.shouldUseSmartSearch(query: trimmed)
             inflightSmartTask = Task {
+                // 250ms debounce — collapse a typing burst into a single
+                // smart-search wave. inflightSmartTask?.cancel() on the
+                // next keystroke propagates here, the sleep throws, and
+                // this task exits before plan() or the source fan-out.
+                // Sync command sources (windows/settings/folders/apps)
+                // fire above and stay instant; only the planner-aware
+                // content path debounces.
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                if Task.isCancelled { return }
                 var useSmart = false
                 if heuristic {
                     useSmart = await smart.isAvailable()
