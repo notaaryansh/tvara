@@ -80,6 +80,11 @@ actor SmartSearchService {
     /// missing key, network error, or unparseable response — callers
     /// should fall back to keyword search on failure.
     func plan(query: String) async throws -> QueryPlan {
+        let tPlanStart = CFAbsoluteTimeGetCurrent()
+        defer {
+            NSLog("SmartSearch: plan() %.1fms query=%@",
+                  (CFAbsoluteTimeGetCurrent() - tPlanStart) * 1000, query)
+        }
         guard let key = loadKey() else { throw SmartSearchError.noAPIKey }
 
         var request = URLRequest(url: Self.endpoint)

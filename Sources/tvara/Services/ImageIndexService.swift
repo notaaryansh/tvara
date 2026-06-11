@@ -246,8 +246,16 @@ actor ImageIndexService {
     func search(_ query: String, limit: Int = 30) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2 else { return [] }
+        let t0 = CFAbsoluteTimeGetCurrent()
+        var stage = t0
+        func mark(_ name: String) {
+            let now = CFAbsoluteTimeGetCurrent()
+            NSLog("ImageSearch: %@ %.1fms", name, (now - stage) * 1000)
+            stage = now
+        }
         guard await ensureModels(),
               let qVec = encodeText(trimmed) else { return [] }
+        mark("encodeText")
         guard let db else { return [] }
 
         // Make sure the label vector cache is warm — the search loop reads
@@ -276,6 +284,7 @@ actor ImageIndexService {
             }
         }
         sqlite3_finalize(stmt)
+        mark("SELECT images (rows=\(rows.count))")
         if rows.isEmpty { return [] }
 
         // ─── Signal 1: image-CLIP cosine ───────────────────────────────────
@@ -287,6 +296,7 @@ actor ImageIndexService {
             imgScores.append((id, s))
         }
         imgScores.sort { $0.1 > $1.1 }
+        mark("imgScores dotpr+sort")
 
         // ─── Signal 2: best-label cosine per image ─────────────────────────
         // First: cosine(query, every label) once.
@@ -296,6 +306,7 @@ actor ImageIndexService {
             vDSP_dotpr(qVec, 1, lvec, 1, &s, vDSP_Length(512))
             labelScore[labelID] = s
         }
+        mark("labelScore dotpr (labels=\(labelCache.count))")
         // Then: per image, max over its tagged labels.
         var bestLabelPerImage: [Int64: Float] = [:]
         var llStmt: OpaquePointer?
@@ -312,6 +323,7 @@ actor ImageIndexService {
             }
         }
         sqlite3_finalize(llStmt)
+        mark("SELECT image_labels (pairs=\(bestLabelPerImage.count))")
         let labelRanks = bestLabelPerImage
             .sorted { $0.value > $1.value }
             .map { ($0.key, $0.value) }
@@ -331,6 +343,7 @@ actor ImageIndexService {
             }
             sqlite3_finalize(bmStmt)
         }
+        mark("BM25 (hits=\(bm25Ranks.count))")
 
         // ─── Fuse via Reciprocal Rank Fusion ───────────────────────────────
         let k: Double = 60
@@ -343,8 +356,9 @@ actor ImageIndexService {
         let imgCosine = Dictionary(uniqueKeysWithValues: imgScores.map { ($0.0, $0.1) })
 
         let fused = rrf.sorted { $0.value > $1.value }.prefix(limit)
+        mark("RRF fusion")
 
-        return fused.compactMap { (imageID, fusedScore) -> SearchResult? in
+        let results: [SearchResult] = fused.compactMap { (imageID, fusedScore) -> SearchResult? in
             guard let r = rows[imageID] else { return nil }
             let imgC = imgCosine[imageID] ?? 0
             let labC = bestLabelPerImage[imageID] ?? 0
@@ -379,6 +393,9 @@ actor ImageIndexService {
                 iconData: iconData
             )
         }
+        mark("results+thumbnails (n=\(results.count))")
+        NSLog("ImageSearch: TOTAL %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        return results
     }
 
     /// Top 3 label names for an image, ordered by stored confidence desc.
