@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 /// LLM-backed query planner. For sentence-like natural-language queries
 /// we ask OpenAI to figure out (a) which data source to search, (b) what
@@ -76,13 +79,45 @@ actor SmartSearchService {
         return words >= 4
     }
 
-    /// Ask the LLM to plan the query. Network + ~1s latency. Throws on
-    /// missing key, network error, or unparseable response — callers
-    /// should fall back to keyword search on failure.
+    /// Ask the LLM to plan the query. Tries Apple's on-device
+    /// FoundationModels first when available (~100-400ms), falls back to
+    /// OpenAI (~1-4s, network) when FM isn't usable. Throws on missing
+    /// key + unavailable FM, network error, or unparseable response —
+    /// callers should fall back to keyword search on failure.
     func plan(query: String) async throws -> QueryPlan {
         let tPlanStart = CFAbsoluteTimeGetCurrent()
+
+        // ── Backend 1: Apple FoundationModels (on-device) ────────────
+        // Requires macOS 26+ AND Apple Intelligence enabled with the
+        // system language model fully downloaded. Any failure here
+        // falls through to OpenAI rather than throwing — FM transient
+        // unavailability (model paging, e.g.) shouldn't kill the query.
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            if case .available = SystemLanguageModel.default.availability {
+                do {
+                    let plan = try await planFoundationModels(query: query)
+                    NSLog("SmartSearch: plan() FM %.1fms query=%@",
+                          (CFAbsoluteTimeGetCurrent() - tPlanStart) * 1000, query)
+                    return plan
+                } catch {
+                    NSLog("SmartSearch: FM failed (%@), falling back to OpenAI",
+                          String(describing: error))
+                }
+            }
+        }
+        #endif
+
+        // ── Backend 2: OpenAI fallback (TEMPORARILY DISABLED) ────────
+        // User is benching FM-only. If we got here, FM was either
+        // unavailable or threw — surface that as an error rather than
+        // silently masking it with an OpenAI call.
+        NSLog("SmartSearch: plan() FM-unavailable, OpenAI fallback disabled query=%@", query)
+        throw SmartSearchError.apiError("FoundationModels unavailable; OpenAI fallback disabled for benching")
+
+        /* OpenAI fallback — re-enable by un-commenting + removing the throw above.
         defer {
-            NSLog("SmartSearch: plan() %.1fms query=%@",
+            NSLog("SmartSearch: plan() openai %.1fms query=%@",
                   (CFAbsoluteTimeGetCurrent() - tPlanStart) * 1000, query)
         }
         guard let key = loadKey() else { throw SmartSearchError.noAPIKey }
@@ -125,7 +160,28 @@ actor SmartSearchService {
                 "JSON decode failed: \(error.localizedDescription); raw: \(content.prefix(200))"
             )
         }
+        */
     }
+
+    // MARK: - FoundationModels backend
+
+    /// On-device planner via Apple's SystemLanguageModel.
+    ///
+    /// Uses @Generable structured output (see GeneratedPlan below): the
+    /// model fills typed fields instead of producing JSON text we parse.
+    /// Two wins over the freeform path: (1) generation is faster because
+    /// the model only emits values, not JSON syntax; (2) the output is
+    /// guaranteed to deserialize — no markdown fences, no parser fallbacks.
+    /// Paired with a slim instructions block (Self.fmSystemPrompt) so
+    /// prefill stays cheap on the on-device model.
+    #if canImport(FoundationModels)
+    @available(macOS 26.0, *)
+    private func planFoundationModels(query: String) async throws -> QueryPlan {
+        let session = LanguageModelSession(instructions: { Self.fmSystemPrompt })
+        let response = try await session.respond(to: query, generating: GeneratedPlan.self)
+        return QueryPlan(generated: response.content)
+    }
+    #endif
 
     /// Plan a compose action from a free-form intent + the content the user
     /// was acting on. The planner decides whether to return a message-send
@@ -379,7 +435,27 @@ actor SmartSearchService {
         return nil
     }
 
-    // MARK: - Prompt
+    // MARK: - Prompts
+
+    /// Minimal instructions for the on-device FoundationModels backend.
+    /// The OpenAI prompt below is ~2500 tokens with examples; on-device
+    /// models prefill linearly, so a long prompt is the dominant cost.
+    /// @Generable schema (GeneratedPlan, below) carries the shape — these
+    /// instructions only have to cover the *semantics* the schema can't.
+    private static let fmSystemPrompt = """
+    Plan a natural-language search query for a personal Mac launcher.
+
+    Sources: messages (WhatsApp/iMessage/Discord), mail, browser (web history), files, apps, clipboard, any.
+
+    Special searchTerm values for literal-token entities:
+      URLs/links → "https"
+      email addresses → "@gmail.com"
+      phone numbers → "+1 555"
+    Otherwise: 2-5 concept synonyms.
+
+    Set contact to the person's name if mentioned, else empty string.
+    Strip filler words from keywords.
+    """
 
     private static let systemPrompt = """
     You are a query planner for tvara, a personal Mac search app. The user types natural-language queries and you decide which of their local data sources to search and what the actual search terms should be.
@@ -537,3 +613,59 @@ private struct OpenAIChatResponse: Decodable {
         let content: String
     }
 }
+
+// MARK: - FoundationModels structured output
+
+/// Mirror of QueryPlan as the on-device model fills it via guided
+/// generation. Fields are all non-optional strings + arrays because
+/// @Generable handles them most reliably; empty string stands in for
+/// "no contact." Converted to a real QueryPlan in the caller.
+#if canImport(FoundationModels)
+@available(macOS 26.0, *)
+@Generable
+struct GeneratedPlan {
+    @Guide(description: "Data source. One of: messages, mail, browser, files, apps, clipboard, any")
+    let source: String
+
+    @Guide(description: "Conceptual search phrase. For URL queries use 'https'. For email queries use '@gmail.com'. For phone-number queries use '+1 555'. Otherwise 2-5 concept synonyms.")
+    let searchTerm: String
+
+    @Guide(description: "1 to 5 short keyword strings from the query with filler words removed")
+    let keywords: [String]
+
+    @Guide(description: "Person's name if mentioned in the query, otherwise empty string")
+    let contact: String
+
+    @Guide(description: "Time window. One of: today, week, month, year, any")
+    let timeRange: String
+
+    @Guide(description: "One sentence describing what is being searched for")
+    let explanation: String
+}
+
+extension QueryPlan {
+    /// Convert the on-device model's structured output into a real
+    /// QueryPlan. Source/timeRange string → enum, empty contact → nil.
+    @available(macOS 26.0, *)
+    init(generated g: GeneratedPlan) {
+        let normalizedSource: Source
+        switch g.source.lowercased() {
+        case "messages", "message", "chat", "chats": normalizedSource = .messages
+        case "mail", "email", "emails":              normalizedSource = .mail
+        case "browser", "web", "history":            normalizedSource = .browser
+        case "files", "file", "folder", "folders":   normalizedSource = .files
+        case "apps", "app", "application":           normalizedSource = .apps
+        case "clipboard", "clip", "pasteboard":      normalizedSource = .clipboard
+        default:                                     normalizedSource = .any
+        }
+        self.source = normalizedSource
+        self.keywords = g.keywords
+        self.contact = g.contact.isEmpty ? nil : g.contact
+        self.searchTerm = g.searchTerm.isEmpty
+            ? g.keywords.joined(separator: " ")
+            : g.searchTerm
+        self.timeRange = TimeRange(rawValue: g.timeRange.lowercased()) ?? .any
+        self.explanation = g.explanation
+    }
+}
+#endif
