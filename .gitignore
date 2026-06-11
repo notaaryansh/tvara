@@ -52,3 +52,13 @@ imagesearch/runs/
 .env.swift
 **/.env.swift
 openai_key.txt
+
+# Embedding eval — contains real Discord messages; rebuild locally with
+# scripts/embeddings/build_eval.py + bench_text.py
+scripts/embeddings/eval_dataset.json
+scripts/embeddings/last_text_run.json
+scripts/embeddings/last_image_run.json
+scripts/embeddings/cache/*
+!scripts/embeddings/cache/.gitignore
+scripts/embeddings/archive/ground_truth_v1.json
+scripts/embeddings/archive/last_text_run_v1.json
