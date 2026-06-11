@@ -177,11 +177,52 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
                 if event.modifierFlags.contains(.command),
                    self.viewModel.results.indices.contains(self.viewModel.selectedIndex) {
                     let r = self.viewModel.results[self.viewModel.selectedIndex]
+                    // ⌘↩ on a collection row is meaningless (the row isn't
+                    // an openable target). Fall through silently — let the
+                    // user pick a thumb first with → before acting.
+                    if case .imagesCollection = r.openTarget {
+                        return nil
+                    }
                     self.viewModel.beginActing(on: r)
+                    return nil
+                }
+                // Photo collection row: row-level ↩ zooms into Images;
+                // thumb-level ↩ opens the focused photo and dismisses.
+                if self.viewModel.results.indices.contains(self.viewModel.selectedIndex),
+                   case .imagesCollection(let photos)
+                        = self.viewModel.results[self.viewModel.selectedIndex].openTarget {
+                    if let thumbIdx = self.viewModel.selectedThumbIndex,
+                       photos.indices.contains(thumbIdx) {
+                        if self.viewModel.open(photos[thumbIdx]) { self.hide() }
+                    } else {
+                        self.viewModel.zoomToImagesFromCollection()
+                    }
                     return nil
                 }
                 if self.viewModel.openSelected() { self.hide() }
                 return nil
+            case kVK_LeftArrow:
+                // ← only does work on a collection row in the blended /
+                // zoomed list — retreats focus through the thumb strip
+                // and back to row-level. Pass through to SwiftUI on any
+                // other row so cursor movement inside the search field
+                // still works the normal way.
+                if self.viewModel.viewMode != .deck,
+                   self.viewModel.selectedPhotoCollection != nil,
+                   self.viewModel.selectedThumbIndex != nil {
+                    self.viewModel.retreatThumbSelection()
+                    return nil
+                }
+                return event
+            case kVK_RightArrow:
+                // → enters / advances thumb focus on a collection row.
+                // Same passthrough-on-other-rows policy as ←.
+                if self.viewModel.viewMode != .deck,
+                   self.viewModel.selectedPhotoCollection != nil {
+                    self.viewModel.advanceThumbSelection()
+                    return nil
+                }
+                return event
             case kVK_Tab:
                 // Tab now toggles the category deck instead of cycling
                 // the (now-removed) pill strip. Shift-Tab is reserved

@@ -281,17 +281,11 @@ struct SearchView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(viewModel.results.enumerated()), id: \.element.id) { idx, result in
-                        SearchResultRow(
-                            result: result,
-                            isSelected: idx == viewModel.selectedIndex,
-                            highlightQuery: viewModel.query
-                        )
-                        .id(result.id)
-                        .onTapGesture {
-                            viewModel.selectedIndex = idx
-                            viewModel.openSelected()
-                        }
+                    if viewModel.activeTab == .all {
+                        sectionedBlendedList
+                    } else {
+                        // Zoomed (single category): flat list, no headers.
+                        flatList
                     }
                 }
                 .padding(.vertical, 6)
@@ -304,6 +298,137 @@ struct SearchView: View {
                 }
             }
         }
+    }
+
+    /// Flat enumeration used in zoom mode where rows aren't grouped.
+    @ViewBuilder
+    private var flatList: some View {
+        ForEach(Array(viewModel.results.enumerated()), id: \.element.id) { idx, result in
+            rowContent(result: result, idx: idx)
+                .id(result.id)
+        }
+    }
+
+    /// Sectioned layout for the blended (.all) view. Renders a small
+    /// header above each section's content WHEN there is more than one
+    /// section visible. With a single section the header is suppressed
+    /// and items render as a flat list — closest to "you searched for X
+    /// and only one source matched, just show that source."
+    @ViewBuilder
+    private var sectionedBlendedList: some View {
+        let sections = viewModel.blendedSections
+        let showHeaders = sections.count > 1
+        ForEach(Array(sections.enumerated()), id: \.element.id) { _, section in
+            if showHeaders {
+                sectionHeader(label: section.kind.label, count: section.items.count)
+            }
+            ForEach(Array(section.items.enumerated()), id: \.element.id) { localIdx, item in
+                let flatIdx = flatIndex(for: section, localIdx: localIdx, in: sections)
+                // Messaging sections render in a compact one-line form
+                // in the blended view. Zoom mode (per-platform tab)
+                // bypasses this path and uses the full SearchResultRow.
+                rowContent(result: item, idx: flatIdx, compact: section.kind.isMessageKind)
+                    .id(item.id)
+            }
+        }
+    }
+
+    /// Map (section, localIdx) → index into the flat `viewModel.results`
+    /// array, so selection highlights stay coherent. Sections appear in
+    /// `blendedSections` order; flat index is the sum of preceding
+    /// sections' item counts plus the local offset.
+    private func flatIndex(
+        for section: SearchViewModel.BlendedSection,
+        localIdx: Int,
+        in sections: [SearchViewModel.BlendedSection]
+    ) -> Int {
+        var offset = 0
+        for s in sections {
+            if s.kind == section.kind { return offset + localIdx }
+            offset += s.items.count
+        }
+        return offset + localIdx
+    }
+
+    /// Slim section title above each group. Calm, secondary-tinted,
+    /// small enough that it reads as chrome and doesn't compete with
+    /// the row content. Mirrors the zoomedHeader style so navigating
+    /// blended → zoomed feels visually continuous.
+    private func sectionHeader(label: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("\(count)")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+    }
+
+    /// One row of the blended/zoomed list. Branches on the synthetic
+    /// "photo collection" row so the horizontal thumb strip replaces
+    /// what would otherwise be N stacked photo rows, and on the
+    /// `compact` flag which the blended view's message sections pass
+    /// in to swap the full message row for a denser one-line layout.
+    @ViewBuilder
+    private func rowContent(result: SearchResult, idx: Int, compact: Bool = false) -> some View {
+        if case .expandSection(let kindRawValue, let hidden) = result.openTarget {
+            SeeMoreRow(
+                hiddenCount: hidden,
+                isSelected: idx == viewModel.selectedIndex
+            )
+            .onTapGesture {
+                viewModel.selectedIndex = idx
+                viewModel.toggleSectionExpanded(kindRawValue: kindRawValue)
+            }
+        } else if case .imagesCollection(let photos) = result.openTarget {
+            PhotoCollectionRow(
+                photos: photos,
+                isSelected: idx == viewModel.selectedIndex,
+                selectedThumbIndex: idx == viewModel.selectedIndex
+                    ? viewModel.selectedThumbIndex : nil,
+                onTapRow: {
+                    viewModel.selectedIndex = idx
+                    viewModel.selectedThumbIndex = nil
+                    viewModel.zoomToImagesFromCollection()
+                },
+                onTapThumb: { thumbIdx in
+                    viewModel.selectedIndex = idx
+                    viewModel.selectedThumbIndex = thumbIdx
+                    if photos.indices.contains(thumbIdx) {
+                        _ = viewModel.open(photos[thumbIdx])
+                    }
+                }
+            )
+        } else if compact && Self.isMessageSource(result.source) {
+            CompactMessageRow(
+                result: result,
+                isSelected: idx == viewModel.selectedIndex,
+                highlightQuery: viewModel.query
+            )
+            .onTapGesture {
+                viewModel.selectedIndex = idx
+                viewModel.openSelected()
+            }
+        } else {
+            SearchResultRow(
+                result: result,
+                isSelected: idx == viewModel.selectedIndex,
+                highlightQuery: viewModel.query
+            )
+            .onTapGesture {
+                viewModel.selectedIndex = idx
+                viewModel.openSelected()
+            }
+        }
+    }
+
+    private static func isMessageSource(_ s: SearchResult.Source) -> Bool {
+        s == .whatsapp || s == .imessage || s == .discord
     }
 
     private var aiBanner: some View {

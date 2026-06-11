@@ -36,6 +36,8 @@ extension SearchResult {
         case .notesNote(let title):             return "notes:" + title
         case .spotifyPlay(let uri, _):          return "spotify:" + uri
         case .windowAction, .systemAction:      return nil
+        case .imagesCollection:                 return nil
+        case .expandSection:                    return nil
         }
     }
 }

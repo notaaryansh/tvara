@@ -69,11 +69,27 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var folderResults: [SearchResult] = []
     @Published private(set) var systemActionResults: [SearchResult] = []
     @Published var selectedIndex: Int = 0
+    /// When the blended view's currently-selected row is the synthetic
+    /// "photo collection" row, this picks which thumb inside the strip
+    /// is focused. `nil` = row-level focus (Enter zooms into Images).
+    /// Non-nil = thumb-level focus (Enter opens that specific photo).
+    /// Cleared whenever the selected row changes via ↑/↓.
+    @Published var selectedThumbIndex: Int? = nil
+    /// Per-section toggle: when a messaging section's kind is in this
+    /// set, the blended view shows all of its items instead of the
+    /// first `blendedMessageSectionCap`. Cleared on every new query
+    /// so expansion doesn't bleed across unrelated searches.
+    @Published private(set) var expandedSections: Set<BlendedSection.Kind> = []
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var isAIThinking: Bool = false
     @Published private(set) var aiExplanation: String? = nil
     @Published var activeTab: SearchTab = .all {
-        didSet { if oldValue != activeTab { selectedIndex = 0 } }
+        didSet {
+            if oldValue != activeTab {
+                selectedIndex = 0
+                selectedThumbIndex = nil
+            }
+        }
     }
 
     /// Top-level UI mode: blended list → category deck (Tab) → zoomed
@@ -93,7 +109,12 @@ final class SearchViewModel: ObservableObject {
     var results: [SearchResult] {
         switch activeTab {
         case .all:
-            return Array(allMerged().prefix(Self.allTabResultCap))
+            // Flatten the sectioned view into a single index space so
+            // ↑/↓ navigation and selectedIndex stay simple. Order
+            // matches the visual layout in SearchView (apps → messages
+            // → mail → notes → images → files → clipboard).
+            let flat = blendedSections.flatMap(\.items)
+            return Array(flat.prefix(Self.allTabResultCap))
         case .messages:
             return Array(messagesMerged().prefix(Self.messagesTabResultCap))
         case .mail:
@@ -160,6 +181,20 @@ final class SearchViewModel: ObservableObject {
 
     private static let allTabResultCap = 60
     private static let messagesTabResultCap = 50
+
+    /// Minimum number of photo matches before the blended view collapses
+    /// them into a single horizontal-thumb-strip row. Below this, photos
+    /// render as individual full-width rows so a single perfect-match
+    /// photo still gets its own line. The threshold balances "don't let
+    /// 8 mediocre CLIP hits eat the screen" against "don't hide the
+    /// occasional strong hit behind a deeplink."
+    private static let photoCollapseThreshold = 3
+
+    /// How many message rows render per platform section in the blended
+    /// view before a "see more" footer appears. Keeps WhatsApp's
+    /// chat-name LIKE match (which can return 30+ rows) from drowning
+    /// every other section.
+    private static let blendedMessageSectionCap = 5
 
     /// Minimum cosine similarity a semantically-reranked result must clear
     /// to be shown. Below this we treat it as noise from the candidate pool
@@ -275,7 +310,8 @@ final class SearchViewModel: ObservableObject {
         switch tab {
         case .all:
             // Reflects what the merged view actually shows (capped).
-            return min(allMerged().count, Self.allTabResultCap)
+            let flat = blendedSections.flatMap(\.items)
+            return min(flat.count, Self.allTabResultCap)
         case .messages:
             return min(messagesMerged().count, Self.messagesTabResultCap)
         case .mail:      return mailResults.count
@@ -313,6 +349,8 @@ final class SearchViewModel: ObservableObject {
             settingsResults = []; folderResults = []
             systemActionResults = []
             selectedIndex = 0; selectedCardIndex = 0
+            selectedThumbIndex = nil
+            expandedSections = []
             viewMode = .blended
             activeTab = .all
             isLoading = false; isAIThinking = false; aiExplanation = nil
@@ -344,6 +382,8 @@ final class SearchViewModel: ObservableObject {
         imageResults = []
         selectedIndex = 0
         selectedCardIndex = 0
+        selectedThumbIndex = nil
+        expandedSections = []
         aiExplanation = nil
 
         currentSearchID &+= 1
@@ -539,6 +579,8 @@ final class SearchViewModel: ObservableObject {
         )
 
         guard searchID == currentSearchID else { return }
+        let tKwGather = CFAbsoluteTimeGetCurrent()
+        NSLog("KwSearch: gather complete (images=\(ig.count) files=\(f.count) mail=\(ml.count) browser=\(b.count) apps=\(a.count) imsg=\(im.count) wa=\(w.count) discord=\(d.count) notes=\(nt.count) notion=\(nn.count) clip=\(cb.count))")
 
         // Apply the frequency reranker per source array. One bulk lookup
         // against the history store covers every candidate; the per-array
@@ -578,6 +620,7 @@ final class SearchViewModel: ObservableObject {
 
         self.selectedIndex = 0
         self.isLoading = false
+        NSLog("KwSearch: TOTAL post-gather %.1fms", (CFAbsoluteTimeGetCurrent() - tKwGather) * 1000)
     }
 
     /// Smart path: ask the LLM to plan the query, then drive existing
@@ -828,45 +871,273 @@ final class SearchViewModel: ObservableObject {
 
     // MARK: - Tab → result merging
 
-    /// "All" merges every source we surface — apps, browser, files, the
-    /// three messaging sources, mail, and clipboard. Terminal results are
-    /// intentionally excluded per UX direction. Sorted by rank desc so
-    /// strong matches (contact name hits at 1000, exact-match apps at 600)
-    /// land at the top regardless of source.
-    private func allMerged() -> [SearchResult] {
-        // Commands + apps + every content source we surface. Used by both
-        // the blended-list view (current main UX) and the count badge on
-        // the All deck card. Terminal results are intentionally excluded.
-        var all: [SearchResult] = []
-        all.append(contentsOf: appResults)
-        all.append(contentsOf: windowResults)
-        all.append(contentsOf: settingsResults)
-        all.append(contentsOf: folderResults)
-        all.append(contentsOf: fileResults)
-        all.append(contentsOf: systemActionResults)
-        if Self.contentSearchEnabled {
-            all.append(contentsOf: whatsappResults)
-            all.append(contentsOf: imessageResults)
-            all.append(contentsOf: discordResults)
-            all.append(contentsOf: mailResults)
-            all.append(contentsOf: notesResults)
-            all.append(contentsOf: notionResults)
-            all.append(contentsOf: linearResults)
-            all.append(contentsOf: spotifyResults)
-            all.append(contentsOf: clipboardResults)
-            all.append(contentsOf: imageResults)
-            all.append(contentsOf: browserResults)
+    /// One row of the sectioned blended view. The view renders a small
+    /// uppercase header above each section's content when more than
+    /// one section is present; with a single section the header is
+    /// suppressed and items render as a plain list. Images get
+    /// collapsed into a single horizontal thumb-strip row inside their
+    /// section ONLY when there are siblings — when images is the lone
+    /// section, every photo renders as a full row.
+    struct BlendedSection: Identifiable, Equatable {
+        /// Section kind — finer-grained than SearchTab so we can split
+        /// Messages into per-platform sections (WhatsApp / iMessage /
+        /// Discord) without affecting the deck/zoom navigation, which
+        /// still treats the three as one .messages tab.
+        enum Kind: String, Hashable {
+            case apps
+            case whatsapp, imessage, discord
+            case mail, notes, images, files, clipboard
+
+            var label: String {
+                switch self {
+                case .apps:      return "Apps"
+                case .whatsapp:  return "WhatsApp"
+                case .imessage:  return "iMessage"
+                case .discord:   return "Discord"
+                case .mail:      return "Mail"
+                case .notes:     return "Notes"
+                case .images:    return "Images"
+                case .files:     return "Files"
+                case .clipboard: return "Clipboard"
+                }
+            }
+
+            /// True when this section is one of the messaging platforms
+            /// and should render in compact (one-line) form in the
+            /// blended view. Zoom mode bypasses this path and uses the
+            /// full row layout regardless.
+            var isMessageKind: Bool {
+                self == .whatsapp || self == .imessage || self == .discord
+            }
+        }
+        let kind: Kind
+        let items: [SearchResult]
+        var id: Kind { kind }
+
+        static func == (lhs: BlendedSection, rhs: BlendedSection) -> Bool {
+            lhs.kind == rhs.kind && lhs.items.map(\.id) == rhs.items.map(\.id)
+        }
+    }
+
+    /// Sectioned view of the blended results in canonical render order.
+    /// Each non-empty source becomes one section; empty sources are
+    /// dropped. Used by SearchView for layout AND by `results` (the
+    /// flat selection index space) so ↑/↓ keeps walking a single list.
+    var blendedSections: [BlendedSection] {
+        var sections: [BlendedSection] = []
+
+        // ── "Apps" section: apps + always-on commands + third-party
+        // shortcuts, mixed together by rank. This is the "things you
+        // can launch / do right now" bucket.
+        let appsLikeItems = (
+            appResults
+            + windowResults
+            + settingsResults
+            + folderResults
+            + systemActionResults
+            + notionResults
+            + linearResults
+            + spotifyResults
+        ).sorted(by: rankSort)
+        if !appsLikeItems.isEmpty {
+            sections.append(BlendedSection(kind: .apps, items: appsLikeItems))
         }
 
-        // Fuzzy suppression: if ANY non-fuzzy match exists in the merged
-        // set, drop all fuzzy matches. Fuzzy is a typo-tolerant fallback
-        // — it should only be visible when nothing else matched at all.
-        // Keeps "shirim" from listing Siri alongside the real shirim
-        // folder.
-        if all.contains(where: { !$0.isFuzzyMatch }) {
-            all.removeAll(where: { $0.isFuzzyMatch })
+        if Self.contentSearchEnabled {
+            // Messages split per-platform — each becomes its own
+            // section with its own header. Within a platform, sort by
+            // rank. Canonical platform order: WhatsApp → iMessage →
+            // Discord.
+            if !whatsappResults.isEmpty {
+                sections.append(BlendedSection(
+                    kind: .whatsapp, items: whatsappResults.sorted(by: rankSort)))
+            }
+            if !imessageResults.isEmpty {
+                sections.append(BlendedSection(
+                    kind: .imessage, items: imessageResults.sorted(by: rankSort)))
+            }
+            if !discordResults.isEmpty {
+                sections.append(BlendedSection(
+                    kind: .discord, items: discordResults.sorted(by: rankSort)))
+            }
+            if !mailResults.isEmpty {
+                sections.append(BlendedSection(
+                    kind: .mail, items: mailResults.sorted(by: rankSort)))
+            }
+            if !notesResults.isEmpty {
+                sections.append(BlendedSection(
+                    kind: .notes, items: notesResults.sorted(by: rankSort)))
+            }
+            if !imageResults.isEmpty {
+                // Items stay raw for now — collapsed below when there
+                // are siblings. Standalone image-only blended view shows
+                // every photo as a full row.
+                sections.append(BlendedSection(
+                    kind: .images, items: imageResults))
+            }
+            if !fileResults.isEmpty {
+                sections.append(BlendedSection(
+                    kind: .files, items: fileResults.sorted(by: rankSort)))
+            }
+            if !clipboardResults.isEmpty {
+                sections.append(BlendedSection(
+                    kind: .clipboard, items: clipboardResults))
+            }
+            // Browser falls into the apps section above (no SearchTab
+            // case for browser). Folded into appsLikeItems separately
+            // would be cleaner long-term; lumping for now since the
+            // category deck does the same.
         }
-        return all.sorted(by: rankSort)
+
+        // When there's more than one section, collapse the images
+        // section to a single thumb-strip row. With only one section,
+        // images render expanded so the user gets the full image list
+        // in the blended view too.
+        if sections.count > 1,
+           let imgIdx = sections.firstIndex(where: { $0.kind == .images }),
+           let stripRow = makePhotoCollectionRow() {
+            sections[imgIdx] = BlendedSection(kind: .images, items: [stripRow])
+        }
+
+        // Per-platform messaging sections cap at N rows + a synthetic
+        // "see more (X)" footer that toggles expandedSections. Skip
+        // capping when there's only one section visible (no risk of
+        // crowding other content) and when this kind is already
+        // expanded.
+        if sections.count > 1 {
+            sections = sections.map { sec in
+                guard sec.kind.isMessageKind,
+                      !expandedSections.contains(sec.kind),
+                      sec.items.count > Self.blendedMessageSectionCap
+                else { return sec }
+                let visible = Array(sec.items.prefix(Self.blendedMessageSectionCap))
+                let hidden = sec.items.count - visible.count
+                let expander = makeExpandSectionRow(kind: sec.kind, hidden: hidden)
+                return BlendedSection(kind: sec.kind, items: visible + [expander])
+            }
+        }
+
+        // Fuzzy suppression: if ANY non-fuzzy match exists across all
+        // sections, drop fuzzy matches everywhere. Fuzzy is a typo-
+        // tolerant fallback — only visible when nothing else matched.
+        let hasNonFuzzy = sections.flatMap(\.items)
+            .contains(where: { !$0.isFuzzyMatch })
+        if hasNonFuzzy {
+            sections = sections.compactMap { sec in
+                let filtered = sec.items.filter { !$0.isFuzzyMatch }
+                return filtered.isEmpty ? nil : BlendedSection(kind: sec.kind, items: filtered)
+            }
+        }
+
+        return sections
+    }
+
+    /// Build the synthetic "N photos matched" row that replaces individual
+    /// photo rows in the blended view. The row's id is a stable sentinel
+    /// (not a fresh UUID) so SwiftUI keeps the same view identity across
+    /// renders — otherwise the thumb-strip's scroll position and the
+    /// thumb selection would reset on every keystroke. Rank is the max
+    /// of the underlying photos so the collapsed row sits where the
+    /// strongest photo would have.
+    private func makePhotoCollectionRow() -> SearchResult? {
+        guard !imageResults.isEmpty else { return nil }
+        let topRank = imageResults.map(\.rank).max() ?? 0
+        return SearchResult(
+            id: SearchResult.photoCollectionRowId,
+            title: "Photos",
+            subtitle: "\(imageResults.count) matches",
+            source: .images,
+            date: nil,
+            badge: nil,
+            openTarget: .imagesCollection(photos: imageResults),
+            rank: topRank
+        )
+    }
+
+    /// Photos array under the currently-selected collection row, if any.
+    /// Nil when the selected row isn't a collection row.
+    var selectedPhotoCollection: [SearchResult]? {
+        guard results.indices.contains(selectedIndex) else { return nil }
+        if case .imagesCollection(let photos) = results[selectedIndex].openTarget {
+            return photos
+        }
+        return nil
+    }
+
+    /// Right-arrow on a collection row. From row-level (selectedThumbIndex
+    /// nil) this enters thumb mode at index 0; from thumb mode it advances
+    /// and clamps to the last thumb. No-op on non-collection rows.
+    func advanceThumbSelection() {
+        guard let photos = selectedPhotoCollection, !photos.isEmpty else { return }
+        let next = (selectedThumbIndex ?? -1) + 1
+        selectedThumbIndex = min(next, photos.count - 1)
+    }
+
+    /// Left-arrow on a collection row. Decrements thumb index; from
+    /// thumb 0 going left exits back to row-level focus. Already at
+    /// row-level → no-op. Non-collection rows → no-op.
+    func retreatThumbSelection() {
+        guard selectedPhotoCollection != nil,
+              let current = selectedThumbIndex else { return }
+        if current <= 0 {
+            selectedThumbIndex = nil
+        } else {
+            selectedThumbIndex = current - 1
+        }
+    }
+
+    /// Triggered by ↩ on the collection row in row-level focus. Mirrors
+    /// what ⇥ → ↩ would do via the category deck, but in one keystroke
+    /// straight from the blended list.
+    func zoomToImagesFromCollection() {
+        activeTab = .images
+        viewMode = .zoomed
+        selectedIndex = 0
+        selectedThumbIndex = nil
+    }
+
+    /// Toggle expanded state for the given messaging section. Triggered
+    /// by ↩ on a `.expandSection` row (the "see more" footer) — the
+    /// row itself remains the selected one so a second ↩ would
+    /// collapse the section back to the cap.
+    func toggleSectionExpanded(kindRawValue: String) {
+        guard let kind = BlendedSection.Kind(rawValue: kindRawValue) else { return }
+        if expandedSections.contains(kind) {
+            expandedSections.remove(kind)
+        } else {
+            expandedSections.insert(kind)
+        }
+        // After expansion the section length changes — clamp selection
+        // so it stays inside the new flat results bounds without
+        // jumping the user's cursor.
+        let count = results.count
+        if count > 0 {
+            selectedIndex = min(selectedIndex, count - 1)
+        }
+    }
+
+    /// Synthetic "+ N more" footer row appended to a capped messaging
+    /// section. Distinct stable id per section kind so SwiftUI keeps
+    /// view identity across re-renders.
+    private func makeExpandSectionRow(kind: BlendedSection.Kind, hidden: Int) -> SearchResult {
+        // Sentinel UUIDs reserved for the per-section expand rows.
+        let id: UUID
+        switch kind {
+        case .whatsapp: id = UUID(uuidString: "00000000-0000-0000-0000-000000000C01")!
+        case .imessage: id = UUID(uuidString: "00000000-0000-0000-0000-000000000C02")!
+        case .discord:  id = UUID(uuidString: "00000000-0000-0000-0000-000000000C03")!
+        default:        id = UUID()
+        }
+        return SearchResult(
+            id: id,
+            title: "See \(hidden) more",
+            subtitle: "",
+            source: .imessage,  // arbitrary — view renders by openTarget kind
+            date: nil,
+            badge: nil,
+            openTarget: .expandSection(kindRawValue: kind.rawValue, hiddenCount: hidden),
+            rank: -1   // sorts below real rows even if it survives a sort
+        )
     }
 
     // MARK: - Category deck
@@ -997,7 +1268,13 @@ final class SearchViewModel: ObservableObject {
     func moveSelection(by delta: Int) {
         guard !results.isEmpty else { return }
         let maxIdx = results.count - 1
-        selectedIndex = min(max(selectedIndex + delta, 0), maxIdx)
+        let newIdx = min(max(selectedIndex + delta, 0), maxIdx)
+        if newIdx != selectedIndex {
+            // Leaving the row clears thumb focus — preserved on the same
+            // row across re-renders, dropped the moment ↑/↓ moves away.
+            selectedThumbIndex = nil
+        }
+        selectedIndex = newIdx
     }
 
     @discardableResult
@@ -1115,6 +1392,23 @@ final class SearchViewModel: ObservableObject {
             // confirmation dialog, so there's no extra safety prompt
             // needed from our side.
             return systemActionsService.execute(action)
+
+        case .imagesCollection:
+            // The blended-view photo strip is a navigation row, not an
+            // openable result. SearchWindowController intercepts Enter
+            // on this case to either zoom into Images or open the
+            // focused thumb's underlying photo — so reaching open()
+            // with .imagesCollection means a tap/path got past the
+            // controller (mouse click). Treat as "zoom into images,
+            // don't dismiss panel."
+            zoomToImagesFromCollection()
+            return false
+
+        case .expandSection(let kindRawValue, _):
+            // Footer row from a capped messaging section. Toggle
+            // expansion in place; never dismisses the panel.
+            toggleSectionExpanded(kindRawValue: kindRawValue)
+            return false
         }
     }
 
@@ -1383,6 +1677,7 @@ final class SearchViewModel: ObservableObject {
         settingsResults = []; folderResults = []
         systemActionResults = []
         selectedIndex = 0; selectedCardIndex = 0
+        selectedThumbIndex = nil
         viewMode = .blended
         isLoading = false; isAIThinking = false; aiExplanation = nil
         commandExclusivity = false

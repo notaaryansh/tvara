@@ -125,6 +125,11 @@ actor WhatsAppService {
             let jid  = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
             let lastMsgTs = sqlite3_column_double(stmt, 3)
             guard !name.isEmpty, !jid.isEmpty else { continue }
+            // Drop WhatsApp's own system-notification chat (partner name
+            // is literally "WhatsApp" — status updates, app
+            // announcements). With per-platform message sections the
+            // row read as a duplicate of the WhatsApp Apps entry.
+            if name.caseInsensitiveCompare("WhatsApp") == .orderedSame { continue }
 
             let avatarData = Self.loadAvatar(forJid: jid, avatarIndex: avatarIndex)
             let date = lastMsgTs > 0

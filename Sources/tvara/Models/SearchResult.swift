@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 struct SearchResult: Identifiable, Hashable {
-    let id = UUID()
+    let id: UUID
     let title: String
     let subtitle: String
     let source: Source
@@ -26,6 +26,7 @@ struct SearchResult: Identifiable, Hashable {
     let isFuzzyMatch: Bool
 
     init(
+        id: UUID = UUID(),
         title: String,
         subtitle: String,
         source: Source,
@@ -38,6 +39,7 @@ struct SearchResult: Identifiable, Hashable {
         remoteArtURL: String? = nil,
         isFuzzyMatch: Bool = false
     ) {
+        self.id = id
         self.title = title
         self.subtitle = subtitle
         self.source = source
@@ -51,6 +53,12 @@ struct SearchResult: Identifiable, Hashable {
         self.isFuzzyMatch = isFuzzyMatch
     }
 
+    /// Sentinel id for the synthetic "photo collection" row that the
+    /// blended view substitutes in place of N individual photo rows.
+    /// Stable across renders so SwiftUI keeps the same view identity even
+    /// as the underlying photo set updates.
+    static let photoCollectionRowId = UUID(uuidString: "00000000-0000-0000-0000-000000000B01")!
+
     var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? subtitle : trimmed
@@ -62,6 +70,7 @@ struct SearchResult: Identifiable, Hashable {
     /// array position the reranker produces).
     func withRank(_ newRank: Int) -> SearchResult {
         SearchResult(
+            id: id,
             title: title, subtitle: subtitle, source: source, date: date,
             badge: badge, openTarget: openTarget, rank: newRank,
             iconData: iconData, senderName: senderName,
@@ -105,6 +114,19 @@ struct SearchResult: Identifiable, Hashable {
         /// System-level action — sleep / shut down / restart / lock screen /
         /// log out. Executed via NSAppleScript off the main thread.
         case systemAction(SystemAction)
+        /// Synthetic "many photos matched" row used in the blended view.
+        /// Enter on the row zooms into the images category; left/right
+        /// scrubs across the inline thumb strip and Enter on a focused
+        /// thumb opens that specific photo. Payload is the photo results
+        /// the row stands in for (preserves their individual openTargets).
+        case imagesCollection(photos: [SearchResult])
+        /// Synthetic footer row appended to a capped blended section
+        /// (one of the per-platform messaging sections currently).
+        /// Enter toggles the section's expanded state in the view
+        /// model so the rest of the items render inline. `kindRawValue`
+        /// is `BlendedSection.Kind.rawValue` — stringly typed so this
+        /// model file doesn't depend on the ViewModel.
+        case expandSection(kindRawValue: String, hiddenCount: Int)
     }
 
     enum Source: String, CaseIterable {

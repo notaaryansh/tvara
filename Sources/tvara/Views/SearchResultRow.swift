@@ -95,6 +95,18 @@ struct SearchResultRow: View {
             // color + the SF Symbol "power" baked into the source. No
             // schematic preview — the symbol itself is the visual.
             tintedBadge
+        case .imagesCollection:
+            // SearchView routes the collection row to PhotoCollectionRow
+            // and never instantiates SearchResultRow for it, so this case
+            // is unreachable in practice. Fall back to the tinted images
+            // badge so a future caller that bypasses the router doesn't
+            // crash.
+            tintedBadge
+        case .expandSection:
+            // Same story: SearchView routes the expand footer to its
+            // own dedicated SeeMoreRow view. Unreachable in practice;
+            // keep a small tinted symbol as the safety fallback.
+            tintedBadge
         case .url:
             if isDiscord {
                 messageAvatar(platformBadge: Self.discordBadgeIcon)
