@@ -114,7 +114,7 @@ actor ClipboardHistoryService {
             let rank = max(40, 200 - Int(minutes / 60))
 
             out.append(SearchResult(
-                title: title(for: snippet),
+                title: matchTitle(snippet: snippet, query: trimmed),
                 subtitle: "Copied from \(app)",
                 source: .clipboard,
                 date: date,
@@ -223,5 +223,37 @@ actor ClipboardHistoryService {
         let trimmed = snippet.trimmingCharacters(in: .whitespaces)
         if trimmed.count <= 80 { return trimmed }
         return String(trimmed.prefix(80)) + "…"
+    }
+
+    /// Title centered on the FIRST occurrence of `query` in the snippet,
+    /// so a clipboard row whose match lives mid-text still reads as
+    /// "…before  MATCH  after…" instead of an opening 80 chars that
+    /// don't contain the query at all. Used by the search path; the no-
+    /// query `recent` path still uses `title(for:)`.
+    ///
+    /// Layout: up to ~28 chars of leading context, the matched span,
+    /// up to ~50 chars of trailing context (bias forward — people scan
+    /// left-to-right). Leading "…" only if we truncated from the left;
+    /// trailing "…" only if we truncated from the right. SearchResultRow's
+    /// `highlightQuery` then bolds the match itself inside the window.
+    private func matchTitle(snippet: String, query: String) -> String {
+        let trimmed = snippet.trimmingCharacters(in: .whitespaces)
+        if trimmed.count <= 80 { return trimmed }
+        guard let r = trimmed.range(of: query, options: .caseInsensitive) else {
+            // Match presumably lived in the raw content but got eaten by
+            // `collapse`'s whitespace normalisation. Fall back to prefix
+            // rather than render a misleading window.
+            return String(trimmed.prefix(80)) + "…"
+        }
+        let preWindow = 28
+        let postWindow = 50
+        let lower = trimmed.index(r.lowerBound, offsetBy: -preWindow, limitedBy: trimmed.startIndex)
+            ?? trimmed.startIndex
+        let upper = trimmed.index(r.upperBound, offsetBy: postWindow, limitedBy: trimmed.endIndex)
+            ?? trimmed.endIndex
+        var out = String(trimmed[lower..<upper])
+        if lower != trimmed.startIndex { out = "…" + out }
+        if upper != trimmed.endIndex   { out = out + "…" }
+        return out
     }
 }

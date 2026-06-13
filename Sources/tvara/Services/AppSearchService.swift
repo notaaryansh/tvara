@@ -75,18 +75,27 @@ final class AppSearchService {
             let rank: Int
             // Tier hierarchy:
             //   1500 — full name equals query exactly ("notion" → Notion.app)
+            //   1400 — query equals the app's acronym ("vsc" → Visual Studio Code,
+            //          "gc" → Google Chrome, "as" → App Store). Acronym only
+            //          exists when the name has 2+ words.
             //   1300 — query equals a WORD inside the name ("chrome" → Google Chrome,
             //          "code" → Visual Studio Code). This sits above file/folder
             //          exact-name matches (~430) so the app wins over a node_modules
             //          folder that happens to share the name.
             //    500 — full name has the query as a prefix
+            //    450 — query is a prefix of the acronym, length >= 2 ("vs" → VS Code).
+            //          Ambiguous at 2 letters (matches multiple apps) but harmless
+            //          since the user is visually scanning a short candidate list.
             //    380 — any word in the name has the query as a prefix
             //    220 — name contains the query as a substring
-            if nameLower == q                       { rank = 1500 }
-            else if wordEqualMatch(nameLower, q)    { rank = 1300 }
-            else if nameLower.hasPrefix(q)          { rank = 500 }
-            else if wordPrefixMatch(nameLower, q)   { rank = 380 }
-            else if nameLower.contains(q)           { rank = 220 }
+            let acro = Self.acronym(of: nameLower)
+            if nameLower == q                                   { rank = 1500 }
+            else if !acro.isEmpty && acro == q                  { rank = 1400 }
+            else if wordEqualMatch(nameLower, q)                { rank = 1300 }
+            else if nameLower.hasPrefix(q)                      { rank = 500 }
+            else if !acro.isEmpty && q.count >= 2 && acro.hasPrefix(q) { rank = 450 }
+            else if wordPrefixMatch(nameLower, q)               { rank = 380 }
+            else if nameLower.contains(q)                       { rank = 220 }
             else { continue }
             scored.append((app, rank))
         }
@@ -176,6 +185,17 @@ final class AppSearchService {
             if token.lowercased() == query { return true }
         }
         return false
+    }
+
+    /// First letter of each word in the (already-lowercased) name,
+    /// concatenated. Returns "" for single-word names where there's no
+    /// acronym to make. "visual studio code" → "vsc", "google chrome" → "gc",
+    /// "app store" → "as", "notion" → "" (single word, fall through to
+    /// other tiers).
+    nonisolated static func acronym(of nameLower: String) -> String {
+        let words = nameLower.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        guard words.count >= 2 else { return "" }
+        return words.compactMap { $0.first.map(String.init) }.joined()
     }
 
     private nonisolated func abbreviate(_ path: String) -> String {
