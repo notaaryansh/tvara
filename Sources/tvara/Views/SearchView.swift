@@ -320,7 +320,11 @@ struct SearchView: View {
         let showHeaders = sections.count > 1
         ForEach(Array(sections.enumerated()), id: \.element.id) { _, section in
             if showHeaders {
-                sectionHeader(label: section.kind.label, count: section.items.count)
+                sectionHeader(
+                    label: section.kind.label,
+                    count: section.items.count,
+                    isLoading: viewModel.loadingSections.contains(section.kind)
+                )
             }
             ForEach(Array(section.items.enumerated()), id: \.element.id) { localIdx, item in
                 let flatIdx = flatIndex(for: section, localIdx: localIdx, in: sections)
@@ -354,14 +358,26 @@ struct SearchView: View {
     /// small enough that it reads as chrome and doesn't compete with
     /// the row content. Mirrors the zoomedHeader style so navigating
     /// blended → zoomed feels visually continuous.
-    private func sectionHeader(label: String, count: Int) -> some View {
+    ///
+    /// When `isLoading` is true the count is hidden and a tiny inline
+    /// ProgressView replaces it — that's the "results still streaming"
+    /// signal per-section, so the user sees apps land while images
+    /// keeps spinning instead of one big synchronized arrival.
+    private func sectionHeader(label: String, count: Int, isLoading: Bool) -> some View {
         HStack(spacing: 6) {
             Text(label)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-            Text("\(count)")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.tertiary)
+            if isLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.7)
+                    .frame(width: 12, height: 12)
+            } else if count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
             Spacer()
         }
         .padding(.horizontal, 18)

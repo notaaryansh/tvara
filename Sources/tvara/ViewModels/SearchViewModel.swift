@@ -81,6 +81,12 @@ final class SearchViewModel: ObservableObject {
     /// so expansion doesn't bleed across unrelated searches.
     @Published private(set) var expandedSections: Set<BlendedSection.Kind> = []
     @Published private(set) var isLoading: Bool = false
+    /// Per-section in-flight set. The blended view reads this to show a
+    /// spinner in each section's header WHILE that source is still
+    /// loading — so apps can render at t=5ms while images keeps spinning
+    /// at t=300ms instead of every section appearing at once. Each per-
+    /// source Task in runKeywordSearch removes its kind on completion.
+    @Published private(set) var loadingSections: Set<BlendedSection.Kind> = []
     @Published private(set) var isAIThinking: Bool = false
     @Published private(set) var aiExplanation: String? = nil
     @Published var activeTab: SearchTab = .all {
@@ -261,7 +267,17 @@ final class SearchViewModel: ObservableObject {
         // Fire every TCC-gated service up front so macOS shows all the
         // permission prompts on launch #1 instead of staggering them across
         // launches as the user first searches each source.
-        Task { [appService] in await appService.warmCache() }
+        // App index — once it's built, re-run the active query so any apps
+        // that should have matched (but couldn't because the cache was
+        // cold) appear without the user having to retype. Cheap: this
+        // only triggers on the very first launch / after a 5-min refresh.
+        Task { [appService, weak self] in
+            await appService.warmCache()
+            guard let self = self else { return }
+            let q = self.query.trimmingCharacters(in: .whitespaces)
+            guard !q.isEmpty, self.appResults.isEmpty else { return }
+            self.appResults = appService.match(query: q)
+        }
         Task { [discordService] in await discordService.warmCache() }
         Task { [clipboardService] in await clipboardService.start() }
         Task { [whatsappService] in await whatsappService.warmCache() }
@@ -354,6 +370,7 @@ final class SearchViewModel: ObservableObject {
             viewMode = .blended
             activeTab = .all
             isLoading = false; isAIThinking = false; aiExplanation = nil
+            loadingSections = []
             commandExclusivity = false
             return
         }
@@ -375,11 +392,33 @@ final class SearchViewModel: ObservableObject {
         // while new ones stream in. Each per-source Task below overwrites
         // its own array as it lands; nothing else mutates the others, so
         // the streaming wave can't accidentally clobber a sibling.
-        appResults = []; fileResults = []; browserResults = []
+        fileResults = []; browserResults = []
         whatsappResults = []; discordResults = []; imessageResults = []
         mailResults = []; notesResults = []; notionResults = []
         linearResults = []; spotifyResults = []; clipboardResults = []
         imageResults = []
+        // Apps NOW runs synchronously against an in-memory index built
+        // at launch (warmCache) — same shape as settings/window/folder.
+        // This is what makes "spoti" surface Spotify in the same frame
+        // as the keystroke instead of after the 80ms debounce + actor
+        // hop. Assigned AFTER clearing so a cold cache leaves it [].
+        appResults           = appService.match(query: trimmed)
+        // Populate the per-section loading set SYNCHRONOUSLY here, before
+        // the debounce/smart-detection task even starts. That way the
+        // section skeleton (every kind's header with a spinner) renders
+        // the instant the user finishes typing — instead of waiting 80ms
+        // for runKeywordSearch to begin, then another N ms for sources to
+        // land. .apps is intentionally NOT in this set: apps are now
+        // populated synchronously above, so the section already has its
+        // final visible content from the same frame.
+        if Self.contentSearchEnabled {
+            loadingSections = [
+                .files, .whatsapp, .discord, .imessage,
+                .mail, .notes, .images, .clipboard,
+            ]
+        } else {
+            loadingSections = []
+        }
         selectedIndex = 0
         selectedCardIndex = 0
         selectedThumbIndex = nil
@@ -432,14 +471,15 @@ final class SearchViewModel: ObservableObject {
             let smart = smartService
             let heuristic = smart.shouldUseSmartSearch(query: trimmed)
             inflightSmartTask = Task {
-                // 250ms debounce — collapse a typing burst into a single
-                // smart-search wave. inflightSmartTask?.cancel() on the
-                // next keystroke propagates here, the sleep throws, and
-                // this task exits before plan() or the source fan-out.
+                // 80ms debounce — short enough that the streaming feel
+                // kicks in fast, long enough to collapse a typing burst
+                // into a single smart-search wave. inflightSmartTask?.cancel()
+                // on the next keystroke propagates here, the sleep throws,
+                // and this task exits before plan() or the source fan-out.
                 // Sync command sources (windows/settings/folders/apps)
                 // fire above and stay instant; only the planner-aware
                 // content path debounces.
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                try? await Task.sleep(nanoseconds: 80_000_000)
                 if Task.isCancelled { return }
                 var useSmart = false
                 if heuristic {
@@ -566,70 +606,131 @@ final class SearchViewModel: ObservableObject {
             ? "Opening \(label)"
             : "Looking in \(label) for \"\(needle)\""
         self.selectedIndex = 0
+        // Single-source path: nothing else is being awaited; collapse every
+        // section spinner that the synchronous skeleton-init set up.
+        self.loadingSections.removeAll()
         self.isLoading = false
         self.isAIThinking = false
     }
 
-    /// Direct keyword search across all services. Existing behavior.
+    /// Direct keyword search across all services.
+    ///
+    /// Each source runs in its own Task and writes back to its @Published
+    /// array as soon as it lands — instead of one big `await (gather, all)`
+    /// that blocked the UI until the slowest source (images) returned.
+    /// `loadingSections` carries the set of section kinds still in flight;
+    /// the blended view shows a header-level spinner for each.
+    ///
+    /// The function returns immediately after spawning the tasks; the
+    /// per-source Tasks each call `finishSection(_:)` on completion which
+    /// flips `isLoading` to false once the last section finishes.
     private func runKeywordSearch(query: String, searchID: Int) async {
-        async let browser   = browserService.search(query: query)
-        async let files     = fileService.search(query: query)
-        async let apps      = appService.search(query: query)
-        async let whatsapp  = whatsappService.search(query: query)
-        async let discord   = discordService.search(query: query)
-        async let imsg      = imessageService.search(query: query)
-        async let mail      = mailService.search(query: query)
-        async let notes     = notesService.search(query: query)
-        async let notion    = notionService.search(query: query)
-        async let clipboard = clipboardService.search(query: query)
-        async let images    = imageService.search(query)
-        let (b, f, a, w, d, im, ml, nt, nn, cb, ig) = await (
-            browser, files, apps, whatsapp, discord, imsg, mail, notes, notion, clipboard, images
-        )
+        // loadingSections was populated synchronously in search() so the
+        // skeleton renders the instant the user finishes typing — no need
+        // to repopulate here. Each per-source Task removes its own kind on
+        // completion via finishSection(_:).
+        let tKw = CFAbsoluteTimeGetCurrent()
 
-        guard searchID == currentSearchID else { return }
-        let tKwGather = CFAbsoluteTimeGetCurrent()
-        NSLog("KwSearch: gather complete (images=\(ig.count) files=\(f.count) mail=\(ml.count) browser=\(b.count) apps=\(a.count) imsg=\(im.count) wa=\(w.count) discord=\(d.count) notes=\(nt.count) notion=\(nn.count) clip=\(cb.count))")
-
-        // Apply the frequency reranker per source array. One bulk lookup
-        // against the history store covers every candidate; the per-array
-        // apply calls are pure and reorder within each source's rank band.
-        // Blacklisted sources (window, system, images) have nil stableId
-        // and pass through unchanged.
-        //
-        // Built iteratively rather than `(b + f + … + ig).compactMap` —
-        // the 11-way array concatenation gives Swift's type checker
-        // chest pain and bloats build time noticeably.
-        var allCandidateIds: [String] = []
-        for src in [b, f, a, w, d, im, ml, nt, nn, cb, ig] {
-            for r in src { if let id = r.stableId { allCandidateIds.append(id) } }
+        // Apps already populated synchronously in search() against the
+        // in-memory index. All that's left for the .apps section here is
+        // Notion docs (which also fold into appsLikeItems via blendedSections)
+        // and the exclusivity check. .apps isn't in loadingSections so this
+        // doesn't need finishSection() — the section appeared instantly
+        // and Notion just appends if/when it lands.
+        Task { [searchID] in
+            let nn = await notionService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(nn.compactMap(\.stableId))
+            self.notionResults = FrequencyReranker.apply(to: nn, history: history)
+            if !self.commandExclusivity {
+                let exact = await self.appService.hasExactNameMatch(query: query)
+                guard searchID == self.currentSearchID else { return }
+                if exact { self.commandExclusivity = true }
+            }
         }
-        let history = await historyStore.lookup(allCandidateIds)
-        self.browserResults = FrequencyReranker.apply(to: b, history: history)
-        self.fileResults = FrequencyReranker.apply(to: f, history: history)
-        self.appResults = FrequencyReranker.apply(to: a, history: history)
-        self.whatsappResults = FrequencyReranker.apply(to: w, history: history)
-        self.discordResults = FrequencyReranker.apply(to: d, history: history)
-        self.imessageResults = FrequencyReranker.apply(to: im, history: history)
-        self.mailResults = FrequencyReranker.apply(to: ml, history: history)
-        self.notesResults = FrequencyReranker.apply(to: nt, history: history)
-        self.notionResults = FrequencyReranker.apply(to: nn, history: history)
-        self.clipboardResults = FrequencyReranker.apply(to: cb, history: history)
-        self.imageResults = ig   // blacklisted from reranking; assign as-is
 
-        // Apps exclusivity arrives late because the cache lookup is async.
-        // If the typed query exactly matches an installed app name and we
-        // didn't already lock in exclusivity from a window/settings/folder
-        // hit, lock it now so content sources drop on this render.
-        if !commandExclusivity {
-            let exact = await appService.hasExactNameMatch(query: query)
-            guard searchID == currentSearchID else { return }
-            if exact { commandExclusivity = true }
+        // Browser results are not part of any blended section but are used
+        // by the Browser tab. Fire-and-forget — not tracked in loadingSections.
+        Task { [searchID] in
+            let b = await self.browserService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(b.compactMap(\.stableId))
+            self.browserResults = FrequencyReranker.apply(to: b, history: history)
+        }
+
+        // Per-section streaming tasks. Each lands independently — finishing
+        // any one of them removes its kind from loadingSections, which
+        // collapses that section's header spinner in the UI.
+        Task { [searchID] in
+            let r = await self.fileService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
+            self.fileResults = FrequencyReranker.apply(to: r, history: history)
+            self.finishSection(.files)
+        }
+        Task { [searchID] in
+            let r = await self.whatsappService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
+            self.whatsappResults = FrequencyReranker.apply(to: r, history: history)
+            self.finishSection(.whatsapp)
+        }
+        Task { [searchID] in
+            let r = await self.discordService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
+            self.discordResults = FrequencyReranker.apply(to: r, history: history)
+            self.finishSection(.discord)
+        }
+        Task { [searchID] in
+            let r = await self.imessageService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
+            self.imessageResults = FrequencyReranker.apply(to: r, history: history)
+            self.finishSection(.imessage)
+        }
+        Task { [searchID] in
+            let r = await self.mailService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
+            self.mailResults = FrequencyReranker.apply(to: r, history: history)
+            self.finishSection(.mail)
+        }
+        Task { [searchID] in
+            let r = await self.notesService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
+            self.notesResults = FrequencyReranker.apply(to: r, history: history)
+            self.finishSection(.notes)
+        }
+        Task { [searchID] in
+            let r = await self.clipboardService.search(query: query)
+            guard searchID == self.currentSearchID else { return }
+            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
+            self.clipboardResults = FrequencyReranker.apply(to: r, history: history)
+            self.finishSection(.clipboard)
+        }
+        Task { [searchID] in
+            // Images are blacklisted from the frequency reranker (stableId
+            // is nil), so we can skip the history lookup entirely.
+            let r = await self.imageService.search(query)
+            guard searchID == self.currentSearchID else { return }
+            self.imageResults = r
+            self.finishSection(.images)
         }
 
         self.selectedIndex = 0
-        self.isLoading = false
-        NSLog("KwSearch: TOTAL post-gather %.1fms", (CFAbsoluteTimeGetCurrent() - tKwGather) * 1000)
+        NSLog("KwSearch: spawned %.1fms after start", (CFAbsoluteTimeGetCurrent() - tKw) * 1000)
+    }
+
+    /// Remove a section's kind from `loadingSections` and flip `isLoading`
+    /// to false once the last section finishes. Called from each per-source
+    /// Task in `runKeywordSearch`.
+    private func finishSection(_ kind: BlendedSection.Kind) {
+        loadingSections.remove(kind)
+        if loadingSections.isEmpty {
+            isLoading = false
+        }
     }
 
     /// Smart path: ask the LLM to plan the query, then drive existing
@@ -730,6 +831,7 @@ final class SearchViewModel: ObservableObject {
             self.spotifyResults = []
             self.clipboardResults = []
             self.selectedIndex = 0
+            self.loadingSections.removeAll()
             self.isLoading = false
             return
         }
@@ -762,6 +864,7 @@ final class SearchViewModel: ObservableObject {
             self.spotifyResults = []
             self.clipboardResults = []
             self.selectedIndex = 0
+            self.loadingSections.removeAll()
             self.isLoading = false
             return
         }
@@ -948,7 +1051,9 @@ final class SearchViewModel: ObservableObject {
             + linearResults
             + spotifyResults
         ).sorted(by: rankSort)
-        if !appsLikeItems.isEmpty {
+        // Keep an empty section when its kind is still loading so the
+        // section header (with spinner) renders BEFORE results land.
+        if !appsLikeItems.isEmpty || loadingSections.contains(.apps) {
             sections.append(BlendedSection(kind: .apps, items: appsLikeItems))
         }
 
@@ -957,38 +1062,38 @@ final class SearchViewModel: ObservableObject {
             // section with its own header. Within a platform, sort by
             // rank. Canonical platform order: WhatsApp → iMessage →
             // Discord.
-            if !whatsappResults.isEmpty {
+            if !whatsappResults.isEmpty || loadingSections.contains(.whatsapp) {
                 sections.append(BlendedSection(
                     kind: .whatsapp, items: whatsappResults.sorted(by: rankSort)))
             }
-            if !imessageResults.isEmpty {
+            if !imessageResults.isEmpty || loadingSections.contains(.imessage) {
                 sections.append(BlendedSection(
                     kind: .imessage, items: imessageResults.sorted(by: rankSort)))
             }
-            if !discordResults.isEmpty {
+            if !discordResults.isEmpty || loadingSections.contains(.discord) {
                 sections.append(BlendedSection(
                     kind: .discord, items: discordResults.sorted(by: rankSort)))
             }
-            if !mailResults.isEmpty {
+            if !mailResults.isEmpty || loadingSections.contains(.mail) {
                 sections.append(BlendedSection(
                     kind: .mail, items: mailResults.sorted(by: rankSort)))
             }
-            if !notesResults.isEmpty {
+            if !notesResults.isEmpty || loadingSections.contains(.notes) {
                 sections.append(BlendedSection(
                     kind: .notes, items: notesResults.sorted(by: rankSort)))
             }
-            if !imageResults.isEmpty {
+            if !imageResults.isEmpty || loadingSections.contains(.images) {
                 // Items stay raw for now — collapsed below when there
                 // are siblings. Standalone image-only blended view shows
                 // every photo as a full row.
                 sections.append(BlendedSection(
                     kind: .images, items: imageResults))
             }
-            if !fileResults.isEmpty {
+            if !fileResults.isEmpty || loadingSections.contains(.files) {
                 sections.append(BlendedSection(
                     kind: .files, items: fileResults.sorted(by: rankSort)))
             }
-            if !clipboardResults.isEmpty {
+            if !clipboardResults.isEmpty || loadingSections.contains(.clipboard) {
                 sections.append(BlendedSection(
                     kind: .clipboard, items: clipboardResults))
             }
