@@ -1,5 +1,5 @@
 import XCTest
-@testable import spotlight__
+@testable import tvara
 
 @MainActor
 final class MessageVerbTests: XCTestCase {

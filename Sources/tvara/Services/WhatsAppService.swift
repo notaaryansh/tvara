@@ -125,11 +125,15 @@ actor WhatsAppService {
             let jid  = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
             let lastMsgTs = sqlite3_column_double(stmt, 3)
             guard !name.isEmpty, !jid.isEmpty else { continue }
-            // Drop WhatsApp's own system-notification chat (partner name
-            // is literally "WhatsApp" — status updates, app
-            // announcements). With per-platform message sections the
-            // row read as a duplicate of the WhatsApp Apps entry.
-            if name.caseInsensitiveCompare("WhatsApp") == .orderedSame { continue }
+            // Drop WhatsApp's own system-notification chats. JID is the
+            // reliable handle: WhatsApp's protocol uses a literal "0"
+            // phone number for system-originated chats (status updates,
+            // app announcements), so `0@s.whatsapp.net` / `0@status` /
+            // etc. all start with "0@". The display name can't be
+            // matched directly because WhatsApp prefixes system names
+            // with U+200E LEFT-TO-RIGHT MARK, which our `==` check
+            // doesn't normalise away.
+            if jid.hasPrefix("0@") { continue }
 
             let avatarData = Self.loadAvatar(forJid: jid, avatarIndex: avatarIndex)
             let date = lastMsgTs > 0
@@ -195,6 +199,10 @@ actor WhatsAppService {
             let sessionType  = Int(sqlite3_column_int(stmt, 5))
 
             guard !text.isEmpty else { continue }
+            // Same system-chat guard as queryChatSessions — drop any
+            // messages whose source chat is a WhatsApp internal
+            // (`0@…`).
+            if jid.hasPrefix("0@") { continue }
 
             let date = Date(timeIntervalSinceReferenceDate: coreDataTime)
             let chatName = displayName(partner: partner, jid: jid, sessionType: sessionType)

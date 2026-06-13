@@ -1,5 +1,5 @@
 import XCTest
-@testable import spotlight__
+@testable import tvara
 
 /// Pins the SystemActionsService alias-matching behaviour. We do NOT test
 /// execute() here — that fires NSAppleScript against System Events and would
