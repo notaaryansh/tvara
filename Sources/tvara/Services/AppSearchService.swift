@@ -164,6 +164,12 @@ final class AppSearchService {
             Self.scanInstalledApps()
         }.value
         cacheTime = Date()
+        // Pre-decode every app icon now so the first time a row renders
+        // it doesn't pop the icon in one frame late. IconCache runs the
+        // decode on a background Task and bulk-stores the result; safe
+        // to fire after every refresh because already-cached paths are
+        // skipped internally.
+        IconCache.shared.warm(paths: cache.map(\.path))
     }
 
     // MARK: - Helpers

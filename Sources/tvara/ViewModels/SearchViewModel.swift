@@ -631,92 +631,75 @@ final class SearchViewModel: ObservableObject {
         // completion via finishSection(_:).
         let tKw = CFAbsoluteTimeGetCurrent()
 
-        // Apps already populated synchronously in search() against the
-        // in-memory index. All that's left for the .apps section here is
-        // Notion docs (which also fold into appsLikeItems via blendedSections)
-        // and the exclusivity check. .apps isn't in loadingSections so this
-        // doesn't need finishSection() — the section appeared instantly
-        // and Notion just appends if/when it lands.
-        Task { [searchID] in
-            let nn = await notionService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(nn.compactMap(\.stableId))
-            self.notionResults = FrequencyReranker.apply(to: nn, history: history)
-            if !self.commandExclusivity {
-                let exact = await self.appService.hasExactNameMatch(query: query)
-                guard searchID == self.currentSearchID else { return }
-                if exact { self.commandExclusivity = true }
+        // Capture services as locals so the detached Tasks below don't
+        // hop through `self` on MainActor just to read them — those hops
+        // were costing back-to-back main blocks of ~5-10ms each when 9
+        // services completed near-simultaneously.
+        let historyStore     = self.historyStore
+        let notionService    = self.notionService
+        let browserService   = self.browserService
+        let imageService     = self.imageService
+        let appService       = self.appService
+
+        // Generic content-search fan-out. Every entry here:
+        //   • runs on a detached executor (off main),
+        //   • awaits its service via the protocol,
+        //   • looks up frequency history + applies the reranker,
+        //   • hops to main exactly once via assignSection(_:searchID:results:).
+        // Adding a new SQLite-backed source is now (kind, service) — no
+        // more 30-line Task block per source.
+        let contentSources: [(BlendedSection.Kind, any ContentSearchSource)] = [
+            (.files,     self.fileService),
+            (.whatsapp,  self.whatsappService),
+            (.discord,   self.discordService),
+            (.imessage,  self.imessageService),
+            (.mail,      self.mailService),
+            (.notes,     self.notesService),
+            (.clipboard, self.clipboardService),
+        ]
+        for (kind, source) in contentSources {
+            Task.detached { [weak self] in
+                let r = await source.search(query: query, limit: 30)
+                let history = await historyStore.lookup(r.compactMap(\.stableId))
+                let reranked = FrequencyReranker.apply(to: r, history: history)
+                await self?.assignSection(kind, searchID: searchID, results: reranked)
             }
+        }
+
+        // .apps section — Notion docs fold into appsLikeItems via
+        // blendedSections. .apps isn't in loadingSections so this doesn't
+        // need finishSection() — the section appeared instantly with the
+        // sync app/window/settings/folder results and Notion just appends.
+        Task.detached { [weak self] in
+            let nn = await notionService.search(query: query)
+            let history = await historyStore.lookup(nn.compactMap(\.stableId))
+            let reranked = FrequencyReranker.apply(to: nn, history: history)
+            await self?.assignNotion(searchID: searchID, results: reranked, query: query)
         }
 
         // Browser results are not part of any blended section but are used
         // by the Browser tab. Fire-and-forget — not tracked in loadingSections.
-        Task { [searchID] in
-            let b = await self.browserService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(b.compactMap(\.stableId))
-            self.browserResults = FrequencyReranker.apply(to: b, history: history)
+        Task.detached { [weak self] in
+            let b = await browserService.search(query: query)
+            let history = await historyStore.lookup(b.compactMap(\.stableId))
+            let reranked = FrequencyReranker.apply(to: b, history: history)
+            await self?.assignBrowser(searchID: searchID, results: reranked)
         }
 
-        // Per-section streaming tasks. Each lands independently — finishing
-        // any one of them removes its kind from loadingSections, which
-        // collapses that section's header spinner in the UI.
-        Task { [searchID] in
-            let r = await self.fileService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
-            self.fileResults = FrequencyReranker.apply(to: r, history: history)
-            self.finishSection(.files)
+        // Images are blacklisted from the frequency reranker (stableId is
+        // nil for every row) and use a different search signature, so they
+        // stay outside the generic fan-out.
+        Task.detached { [weak self] in
+            let r = await imageService.search(query)
+            await self?.assignSection(.images, searchID: searchID, results: r)
         }
-        Task { [searchID] in
-            let r = await self.whatsappService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
-            self.whatsappResults = FrequencyReranker.apply(to: r, history: history)
-            self.finishSection(.whatsapp)
-        }
-        Task { [searchID] in
-            let r = await self.discordService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
-            self.discordResults = FrequencyReranker.apply(to: r, history: history)
-            self.finishSection(.discord)
-        }
-        Task { [searchID] in
-            let r = await self.imessageService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
-            self.imessageResults = FrequencyReranker.apply(to: r, history: history)
-            self.finishSection(.imessage)
-        }
-        Task { [searchID] in
-            let r = await self.mailService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
-            self.mailResults = FrequencyReranker.apply(to: r, history: history)
-            self.finishSection(.mail)
-        }
-        Task { [searchID] in
-            let r = await self.notesService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
-            self.notesResults = FrequencyReranker.apply(to: r, history: history)
-            self.finishSection(.notes)
-        }
-        Task { [searchID] in
-            let r = await self.clipboardService.search(query: query)
-            guard searchID == self.currentSearchID else { return }
-            let history = await self.historyStore.lookup(r.compactMap(\.stableId))
-            self.clipboardResults = FrequencyReranker.apply(to: r, history: history)
-            self.finishSection(.clipboard)
-        }
-        Task { [searchID] in
-            // Images are blacklisted from the frequency reranker (stableId
-            // is nil), so we can skip the history lookup entirely.
-            let r = await self.imageService.search(query)
-            guard searchID == self.currentSearchID else { return }
-            self.imageResults = r
-            self.finishSection(.images)
+
+        // Exclusivity check — also off main until the final flag write.
+        Task.detached { [weak self] in
+            guard let self = self else { return }
+            if await self.commandExclusivity { return }
+            let exact = await appService.hasExactNameMatch(query: query)
+            if exact { await self.markExclusive(searchID: searchID) }
         }
 
         self.selectedIndex = 0
@@ -731,6 +714,50 @@ final class SearchViewModel: ObservableObject {
         if loadingSections.isEmpty {
             isLoading = false
         }
+    }
+
+    // MARK: - Main-thread writebacks for the detached fan-out
+    //
+    // Each per-source task in runKeywordSearch does all of its heavy work
+    // (await service.search, await historyStore.lookup, FrequencyReranker.apply)
+    // on a detached executor — i.e. OFF main — and then calls one of these
+    // helpers to touch @Published. Keeping the main-thread window per task
+    // to a single write avoids the "9 services land at once → 9 back-to-back
+    // 5ms main-thread blocks → main feels frozen" pattern.
+
+    private func assignSection(
+        _ kind: BlendedSection.Kind,
+        searchID: Int,
+        results: [SearchResult]
+    ) {
+        guard searchID == currentSearchID else { return }
+        switch kind {
+        case .files:     fileResults = results
+        case .whatsapp:  whatsappResults = results
+        case .discord:   discordResults = results
+        case .imessage:  imessageResults = results
+        case .mail:      mailResults = results
+        case .notes:     notesResults = results
+        case .images:    imageResults = results
+        case .clipboard: clipboardResults = results
+        case .apps:      break  // apps populate synchronously in search()
+        }
+        finishSection(kind)
+    }
+
+    private func assignNotion(searchID: Int, results: [SearchResult], query: String) {
+        guard searchID == currentSearchID else { return }
+        notionResults = results
+    }
+
+    private func assignBrowser(searchID: Int, results: [SearchResult]) {
+        guard searchID == currentSearchID else { return }
+        browserResults = results
+    }
+
+    private func markExclusive(searchID: Int) {
+        guard searchID == currentSearchID else { return }
+        commandExclusivity = true
     }
 
     /// Smart path: ask the LLM to plan the query, then drive existing

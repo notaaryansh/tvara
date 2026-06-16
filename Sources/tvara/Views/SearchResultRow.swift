@@ -349,11 +349,15 @@ private struct FileIconView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSImageView {
         let view = NSImageView()
         view.imageScaling = .scaleProportionallyUpOrDown
-        view.image = NSWorkspace.shared.icon(forFile: path)
+        // Read through IconCache so paths pre-warmed at launch (every
+        // installed app) render with their bitmap already decoded —
+        // otherwise NSImage's lazy decode happens on first draw and the
+        // icon visibly fills in one frame after the row.
+        view.image = IconCache.shared.icon(forPath: path)
         return view
     }
 
     func updateNSView(_ nsView: NSImageView, context: Context) {
-        nsView.image = NSWorkspace.shared.icon(forFile: path)
+        nsView.image = IconCache.shared.icon(forPath: path)
     }
 }
