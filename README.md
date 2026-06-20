@@ -10,7 +10,7 @@
 
 ## A new way to navigate your Mac
 
-PS: First stable version is WIP! <3 
+<br>PS: First stable version is WIP! <3 <br>
 Your messages, photos, emails, notes, browser history, and clipboard
 all live on this disk. To find any one of them today, you open the
 right app and use its searchbox. Twelve apps, twelve searchboxes,
