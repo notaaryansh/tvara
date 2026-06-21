@@ -39,13 +39,16 @@ actor ImageProducer {
         let bus = self.bus
         let watcher = FSEventsWatcher(paths: paths) { path in
             guard Self.shouldEnqueue(path: path) else { return }
+            // Mtime in the key so a re-saved image gets re-indexed instead
+            // of being permanently silenced by the original dedupe row.
+            let mtime = FileProducer.mtimeBucket(path: path)
             Task.detached(priority: .utility) {
                 let payload = ImageAddedPayload(path: path)
-                await bus.enqueue(
+                _ = try? await bus.enqueue(
                     type: EventType.imageAdded,
                     source: EventSource.fs,
                     payload: payload,
-                    dedupeKey: "img:\(path)"
+                    dedupeKey: "img:\(path):\(mtime)"
                 )
             }
         }

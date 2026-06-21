@@ -24,10 +24,6 @@ final class EventBusPipeline: @unchecked Sendable {
     private let imageWorker: ImageIndexWorker
     private let imageRunner: WorkerRunner
 
-    private let embedStore: EmbeddingStore
-    private let embedWorker: EmbedMessageWorker
-    private let embedRunner: WorkerRunner
-
     init(
         imessage: AppleMessagesService,
         images: ImageIndexService
@@ -36,7 +32,7 @@ final class EventBusPipeline: @unchecked Sendable {
         self.bus = bus
 
         self.imsgProducer = IMessageProducer(bus: bus, service: imessage)
-        self.imsgWorker = MessageIndexWorker(imessage: imessage, bus: bus)
+        self.imsgWorker = MessageIndexWorker(imessage: imessage)
         self.imsgRunner = WorkerRunner(bus: bus, worker: imsgWorker)
 
         self.fileIndex = FileIndexService()
@@ -53,10 +49,6 @@ final class EventBusPipeline: @unchecked Sendable {
         )
         self.imageWorker = ImageIndexWorker(images: images)
         self.imageRunner = WorkerRunner(bus: bus, worker: imageWorker)
-
-        self.embedStore = EmbeddingStore()
-        self.embedWorker = EmbedMessageWorker(store: embedStore, imessage: imessage)
-        self.embedRunner = WorkerRunner(bus: bus, worker: embedWorker)
     }
 
     func start() async {
@@ -66,7 +58,6 @@ final class EventBusPipeline: @unchecked Sendable {
         await fileRunner.start()
         await imageProducer.start()
         await imageRunner.start()
-        await embedRunner.start()
 
         let depth = await bus.depthByStatus()
         let pending = depth["pending"] ?? 0

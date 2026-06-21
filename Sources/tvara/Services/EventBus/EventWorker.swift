@@ -75,8 +75,11 @@ actor WorkerRunner {
                     continue
                 }
                 let results = await worker.processBatch(batch)
+                // Finalize every claimed event before honouring cancellation
+                // — bailing out mid-loop would leave processed rows stuck
+                // in `processing` until the stale-claim sweep ran.
+                // Cancellation takes effect at the next claim boundary.
                 for r in results {
-                    if Task.isCancelled { break }
                     if let err = r.error {
                         await bus.fail(id: r.id, error: "\(err)")
                     } else {

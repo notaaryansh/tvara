@@ -13,14 +13,9 @@ final class MessageIndexWorker: EventWorker, @unchecked Sendable {
     let pollInterval: TimeInterval = 3.0
 
     private let imessage: AppleMessagesService
-    /// Optional: when set, the worker enqueues `embed_message` events
-    /// downstream after each successful index. Nil disables that hop —
-    /// useful for tests that don't want to model the embedding side.
-    private let bus: EventBus?
 
-    init(imessage: AppleMessagesService, bus: EventBus? = nil) {
+    init(imessage: AppleMessagesService) {
         self.imessage = imessage
-        self.bus = bus
     }
 
     /// Single-event path — only used if `processBatch` isn't overridden
@@ -33,8 +28,8 @@ final class MessageIndexWorker: EventWorker, @unchecked Sendable {
     }
 
     /// Group events by source and dispatch one bulk-index call per source.
-    /// Any decode/SQLite failure marks all events in that bucket as failed
-    /// (they get retried with backoff individually).
+    /// Any decode/SQLite failure surfaces as an error for every event in
+    /// that bucket so the bus retries them with backoff.
     func processBatch(_ events: [Event]) async -> [BatchResult] {
         var bySource: [String: [(id: Int64, rowid: Int64)]] = [:]
         var out: [BatchResult] = []
@@ -58,25 +53,18 @@ final class MessageIndexWorker: EventWorker, @unchecked Sendable {
             switch source {
             case EventSource.imessage:
                 let rowids = entries.map(\.rowid)
-                await imessage.indexRowIds(rowids)
-                // Hand off to the embed worker via the bus. Decoupling
-                // means heavy OpenAI calls don't block the cheap index.
-                if let bus {
-                    for rowid in rowids {
-                        let payload = EmbedMessagePayload(
-                            messageId: rowid,
-                            source: EventSource.imessage
-                        )
-                        await bus.enqueue(
-                            type: EventType.embedMessage,
-                            source: EventSource.imessage,
-                            payload: payload,
-                            dedupeKey: "embed:imessage:\(rowid)"
-                        )
+                do {
+                    try await imessage.indexRowIds(rowids)
+                    for entry in entries {
+                        out.append(BatchResult(id: entry.id, error: nil))
                     }
-                }
-                for entry in entries {
-                    out.append(BatchResult(id: entry.id, error: nil))
+                } catch {
+                    // Transient chat.db copy / sqlite failure — let the
+                    // bus retry the whole batch rather than silently
+                    // dropping the events.
+                    for entry in entries {
+                        out.append(BatchResult(id: entry.id, error: error))
+                    }
                 }
             default:
                 // Unknown source: mark failed so it surfaces in diagnostics.

@@ -84,7 +84,12 @@ final class FSEventsWatcher: @unchecked Sendable {
             return
         }
         FSEventStreamSetDispatchQueue(s, queue)
-        FSEventStreamStart(s)
+        guard FSEventStreamStart(s) else {
+            NSLog("FSEventsWatcher: FSEventStreamStart failed")
+            FSEventStreamInvalidate(s)
+            FSEventStreamRelease(s)
+            return
+        }
         stream = s
     }
 

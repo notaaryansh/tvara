@@ -37,13 +37,17 @@ actor FileProducer {
         let bus = self.bus
         let watcher = FSEventsWatcher(paths: paths) { path in
             guard Self.shouldEnqueue(path: path) else { return }
+            // Include the integer mtime in the dedupe key so a later save
+            // to the same path produces a fresh event. Path-only dedupe
+            // would permanently suppress updates after the first event.
+            let mtime = Self.mtimeBucket(path: path)
             Task.detached(priority: .utility) {
                 let payload = FileAddedPayload(path: path)
-                await bus.enqueue(
+                _ = try? await bus.enqueue(
                     type: EventType.fileAdded,
                     source: EventSource.fs,
                     payload: payload,
-                    dedupeKey: "fs:\(path)"
+                    dedupeKey: "fs:\(path):\(mtime)"
                 )
             }
         }
@@ -62,5 +66,13 @@ actor FileProducer {
         let ext = (basename as NSString).pathExtension.lowercased()
         if temporaryExtensions.contains(ext) { return false }
         return true
+    }
+
+    /// Integer mtime (seconds) used as the dedupe bucket. Missing/unreadable
+    /// → 0 so callers still get a stable key per path.
+    nonisolated static func mtimeBucket(path: String) -> Int64 {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        let date = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return Int64(date)
     }
 }

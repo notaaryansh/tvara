@@ -7,7 +7,6 @@ enum EventType {
     static let messageAdded = "message_added"
     static let fileAdded = "file_added"
     static let imageAdded = "image_added"
-    static let embedMessage = "embed_message"
 }
 
 /// Canonical strings stored in `events.source`.
@@ -35,27 +34,24 @@ struct ImageAddedPayload: Codable {
     let path: String
 }
 
-struct EmbedMessagePayload: Codable {
-    let messageId: Int64
-    let source: String
-}
-
 // MARK: - Codable convenience
 
 extension EventBus {
-    /// JSON-encode then enqueue. Returns the new row id, or nil on dedupe.
+    /// JSON-encode then enqueue. Returns the new row id, nil on dedupe,
+    /// or throws on a real persistence/encoding failure so producers can
+    /// decline to advance their watermark.
     @discardableResult
     func enqueue<P: Codable>(
         type: String,
         source: String,
         payload: P,
         dedupeKey: String? = nil
-    ) -> Int64? {
-        guard let data = try? JSONEncoder().encode(payload),
-              let json = String(data: data, encoding: .utf8) else {
-            return nil
+    ) throws -> Int64? {
+        let data = try JSONEncoder().encode(payload)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw EventBusError.encodeFailure
         }
-        return enqueue(type: type, source: source, payload: json, dedupeKey: dedupeKey)
+        return try enqueue(type: type, source: source, payload: json, dedupeKey: dedupeKey)
     }
 }
 

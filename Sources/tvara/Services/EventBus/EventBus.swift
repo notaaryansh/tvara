@@ -57,9 +57,9 @@ actor EventBus {
             nil
         ) == SQLITE_OK else {
             NSLog("EventBus: failed to open db at %@", dbPath)
+            if handle != nil { sqlite3_close(handle) }
             return
         }
-        self.db = handle
 
         let bootstrap: [String] = [
             "PRAGMA journal_mode=WAL",
@@ -81,8 +81,16 @@ actor EventBus {
             """,
             "CREATE INDEX IF NOT EXISTS idx_events_status_type ON events(status, type, not_before)",
         ]
-        for s in bootstrap { sqlite3_exec(handle, s, nil, nil, nil) }
+        for s in bootstrap {
+            if sqlite3_exec(handle, s, nil, nil, nil) != SQLITE_OK {
+                let msg = String(cString: sqlite3_errmsg(handle))
+                NSLog("EventBus: bootstrap stmt failed: %@ (%@)", s, msg)
+                sqlite3_close(handle)
+                return
+            }
+        }
 
+        self.db = handle
         recoverStaleClaims()
         self.ready = true
     }
@@ -106,16 +114,18 @@ actor EventBus {
 
     /// Enqueue an event. Duplicate `dedupeKey`s are silently ignored — that's
     /// how producers stay idempotent without remembering what they pushed.
-    /// Returns the new row id, or `nil` if the insert was a dedupe no-op.
+    /// Returns the new row id, `nil` if the insert was a dedupe no-op, or
+    /// throws on a real persistence failure so producers can decline to
+    /// advance their watermark.
     @discardableResult
     func enqueue(
         type: String,
         source: String,
         payload: String,
         dedupeKey: String? = nil
-    ) -> Int64? {
+    ) throws -> Int64? {
         ensureOpen()
-        guard let db else { return nil }
+        guard let db else { throw EventBusError.notReady }
 
         let sql = """
         INSERT OR IGNORE INTO events (type, source, payload, enqueued_at, dedupe_key)
@@ -123,7 +133,9 @@ actor EventBus {
         """
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw EventBusError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
         sqlite3_bind_text(stmt, 1, type, -1, SQLITE_TRANSIENT_EB)
         sqlite3_bind_text(stmt, 2, source, -1, SQLITE_TRANSIENT_EB)
         sqlite3_bind_text(stmt, 3, payload, -1, SQLITE_TRANSIENT_EB)
@@ -133,7 +145,9 @@ actor EventBus {
         } else {
             sqlite3_bind_null(stmt, 5)
         }
-        guard sqlite3_step(stmt) == SQLITE_DONE else { return nil }
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw EventBusError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
         return sqlite3_changes(db) > 0 ? sqlite3_last_insert_rowid(db) : nil
     }
 
@@ -176,18 +190,26 @@ actor EventBus {
         sqlite3_finalize(stmt)
         guard !events.isEmpty else { return [] }
 
-        let claim = "UPDATE events SET status='processing', claimed_at=? WHERE id=?"
+        // Only return events whose UPDATE actually flipped status to
+        // processing. A failed step here means the row wasn't claimed and
+        // surfacing it would let two workers race the same id.
+        let claim = "UPDATE events SET status='processing', claimed_at=? WHERE id=? AND status='pending'"
+        var claimed: [Event] = []
+        claimed.reserveCapacity(events.count)
         var cStmt: OpaquePointer?
         if sqlite3_prepare_v2(db, claim, -1, &cStmt, nil) == SQLITE_OK {
             for e in events {
                 sqlite3_bind_double(cStmt, 1, now)
                 sqlite3_bind_int64(cStmt, 2, e.id)
-                sqlite3_step(cStmt)
+                let step = sqlite3_step(cStmt)
                 sqlite3_reset(cStmt)
+                if step == SQLITE_DONE && sqlite3_changes(db) > 0 {
+                    claimed.append(e)
+                }
             }
             sqlite3_finalize(cStmt)
         }
-        return events
+        return claimed
     }
 
     /// Mark a claimed event done.
@@ -310,6 +332,24 @@ actor EventBus {
         sqlite3_exec(db, "UPDATE events SET not_before=0 WHERE status='pending'", nil, nil, nil)
     }
 
+    /// Test-only: how many times the row with this dedupe key has been
+    /// failed. Used to wait for `bus.fail` to have actually run before
+    /// the test clears backoff — checking status alone is racy because
+    /// `pending` is also the initial state.
+    func _testAttempts(dedupeKey: String) -> Int {
+        ensureOpen()
+        guard let db else { return 0 }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(
+            db, "SELECT attempts FROM events WHERE dedupe_key = ?",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return 0 }
+        sqlite3_bind_text(stmt, 1, dedupeKey, -1, SQLITE_TRANSIENT_EB)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
+
     /// Test-only: subtract `seconds` from all `claimed_at` timestamps so
     /// the stale-claim recovery path can be exercised without sleeping.
     func _testAgeProcessingClaims(by seconds: TimeInterval) {
@@ -336,4 +376,18 @@ struct Event {
     let payload: String
     let attempts: Int
     let enqueuedAt: TimeInterval
+}
+
+enum EventBusError: Error, CustomStringConvertible {
+    case notReady
+    case sqlite(String)
+    case encodeFailure
+
+    var description: String {
+        switch self {
+        case .notReady:         return "EventBus: db not open"
+        case .sqlite(let s):    return "EventBus sqlite: \(s)"
+        case .encodeFailure:    return "EventBus: payload encode failed"
+        }
+    }
 }

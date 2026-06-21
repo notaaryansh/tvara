@@ -19,9 +19,9 @@ final class EventBusTests: XCTestCase {
 
     // MARK: - enqueue
 
-    func testEnqueueReturnsRowId() async {
+    func testEnqueueReturnsRowId() async throws {
         let bus = EventBus(dbPath: tempDB)
-        let id = await bus.enqueue(
+        let id = try await bus.enqueue(
             type: EventType.messageAdded,
             source: EventSource.imessage,
             payload: "{}"
@@ -30,13 +30,13 @@ final class EventBusTests: XCTestCase {
         XCTAssertGreaterThan(id!, 0)
     }
 
-    func testDedupeKeyPreventsDoubleEnqueue() async {
+    func testDedupeKeyPreventsDoubleEnqueue() async throws {
         let bus = EventBus(dbPath: tempDB)
-        let first = await bus.enqueue(
+        let first = try await bus.enqueue(
             type: EventType.messageAdded, source: EventSource.imessage,
             payload: "{}", dedupeKey: "imessage:42"
         )
-        let second = await bus.enqueue(
+        let second = try await bus.enqueue(
             type: EventType.messageAdded, source: EventSource.imessage,
             payload: "{}", dedupeKey: "imessage:42"
         )
@@ -44,13 +44,13 @@ final class EventBusTests: XCTestCase {
         XCTAssertNil(second, "duplicate dedupe_key must be a silent no-op")
     }
 
-    func testNilDedupeKeyAllowsRepeatedEnqueue() async {
+    func testNilDedupeKeyAllowsRepeatedEnqueue() async throws {
         let bus = EventBus(dbPath: tempDB)
-        let a = await bus.enqueue(
+        let a = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{\"path\":\"/a\"}"
         )
-        let b = await bus.enqueue(
+        let b = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{\"path\":\"/a\"}"
         )
@@ -61,13 +61,13 @@ final class EventBusTests: XCTestCase {
 
     // MARK: - claim
 
-    func testClaimReturnsOnlyMatchingType() async {
+    func testClaimReturnsOnlyMatchingType() async throws {
         let bus = EventBus(dbPath: tempDB)
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.messageAdded, source: EventSource.imessage,
             payload: "{}", dedupeKey: "a"
         )
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "b"
         )
@@ -77,10 +77,10 @@ final class EventBusTests: XCTestCase {
         XCTAssertEqual(messages.first?.type, EventType.messageAdded)
     }
 
-    func testClaimRespectsLimit() async {
+    func testClaimRespectsLimit() async throws {
         let bus = EventBus(dbPath: tempDB)
         for i in 0..<5 {
-            await bus.enqueue(
+            _ = try await bus.enqueue(
                 type: EventType.fileAdded, source: EventSource.fs,
                 payload: "{}", dedupeKey: "k\(i)"
             )
@@ -89,9 +89,9 @@ final class EventBusTests: XCTestCase {
         XCTAssertEqual(batch.count, 3)
     }
 
-    func testSecondClaimSkipsAlreadyProcessing() async {
+    func testSecondClaimSkipsAlreadyProcessing() async throws {
         let bus = EventBus(dbPath: tempDB)
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "x"
         )
@@ -103,9 +103,9 @@ final class EventBusTests: XCTestCase {
 
     // MARK: - complete + fail
 
-    func testCompleteMarksDone() async {
+    func testCompleteMarksDone() async throws {
         let bus = EventBus(dbPath: tempDB)
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "p"
         )
@@ -118,9 +118,9 @@ final class EventBusTests: XCTestCase {
         XCTAssertNil(depth["processing"])
     }
 
-    func testFailRequeuesUnderMaxAttempts() async {
+    func testFailRequeuesUnderMaxAttempts() async throws {
         let bus = EventBus(dbPath: tempDB)
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "q"
         )
@@ -132,9 +132,9 @@ final class EventBusTests: XCTestCase {
         XCTAssertNil(depth["failed"])
     }
 
-    func testFailFinalisesAfterMaxAttempts() async {
+    func testFailFinalisesAfterMaxAttempts() async throws {
         let bus = EventBus(dbPath: tempDB)
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "r"
         )
@@ -150,9 +150,9 @@ final class EventBusTests: XCTestCase {
         XCTAssertNil(depth["pending"])
     }
 
-    func testBackoffPreventsImmediateReclaim() async {
+    func testBackoffPreventsImmediateReclaim() async throws {
         let bus = EventBus(dbPath: tempDB)
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "bf"
         )
@@ -165,10 +165,10 @@ final class EventBusTests: XCTestCase {
 
     // MARK: - Codable payload helpers
 
-    func testCodablePayloadRoundTrip() async {
+    func testCodablePayloadRoundTrip() async throws {
         let bus = EventBus(dbPath: tempDB)
         let payload = MessageAddedPayload(rowid: 12345, chatId: "+15551234567")
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.messageAdded,
             source: EventSource.imessage,
             payload: payload,
@@ -183,9 +183,9 @@ final class EventBusTests: XCTestCase {
 
     // MARK: - Recovery
 
-    func testStaleProcessingRowRecoveredOnReopen() async {
+    func testStaleProcessingRowRecoveredOnReopen() async throws {
         let bus1 = EventBus(dbPath: tempDB)
-        await bus1.enqueue(
+        _ = try await bus1.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "s"
         )

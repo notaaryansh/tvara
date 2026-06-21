@@ -38,8 +38,12 @@ actor FileIndexService {
             dbPath, &handle,
             SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
             nil
-        ) == SQLITE_OK else { return }
-        self.db = handle
+        ) == SQLITE_OK else {
+            // Even a non-OK open can hand back a non-nil handle that must
+            // be closed to avoid leaking the underlying file descriptor.
+            if handle != nil { sqlite3_close(handle) }
+            return
+        }
 
         for s in [
             "PRAGMA journal_mode=WAL",
@@ -55,7 +59,14 @@ actor FileIndexService {
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_files_recent_added ON files_recent(added_at DESC)",
-        ] { sqlite3_exec(handle, s, nil, nil, nil) }
+        ] {
+            if sqlite3_exec(handle, s, nil, nil, nil) != SQLITE_OK {
+                NSLog("FileIndexService: bootstrap stmt failed: %@", s)
+                sqlite3_close(handle)
+                return
+            }
+        }
+        self.db = handle
         self.ready = true
     }
 

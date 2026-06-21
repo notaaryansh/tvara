@@ -73,11 +73,11 @@ final class FileIndexWorkerTests: XCTestCase {
         let runner = WorkerRunner(bus: bus, worker: worker)
 
         // Enqueue directly (no FSEvents — would be flaky in tests).
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: FileAddedPayload(path: file1), dedupeKey: "fs:\(file1)"
         )
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: FileAddedPayload(path: file2), dedupeKey: "fs:\(file2)"
         )

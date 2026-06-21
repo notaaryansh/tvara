@@ -244,21 +244,17 @@ actor AppleMessagesService {
 
     /// Queue-driven entry point: decode + ingest a specific batch of
     /// chat.db ROWIDs. Idempotent (INSERT OR REPLACE) so re-processing a
-    /// `message_added` event after a crash is safe. Bumps the legacy
-    /// `last_message_id` watermark so the pull-path skips work the queue
-    /// has already done.
-    func indexRowIds(_ rowids: [Int64]) async {
+    /// `message_added` event after a crash is safe. Throws on transient
+    /// failures (chat.db copy / sqlite open) so the worker can retry;
+    /// only bumps the `last_message_id` watermark after a successful pass.
+    func indexRowIds(_ rowids: [Int64]) async throws {
         let unique = Array(Set(rowids))
         guard !unique.isEmpty else { return }
 
         let chatPath = chatDbPath
         let dbCopyPath = NSTemporaryDirectory()
             + "spotlight_imsg_queue_\(UUID().uuidString).db"
-        do {
-            try FileManager.default.copyItem(atPath: chatPath, toPath: dbCopyPath)
-        } catch {
-            return
-        }
+        try FileManager.default.copyItem(atPath: chatPath, toPath: dbCopyPath)
         if FileManager.default.fileExists(atPath: chatPath + "-wal") {
             try? FileManager.default.copyItem(
                 atPath: chatPath + "-wal", toPath: dbCopyPath + "-wal"
@@ -270,21 +266,28 @@ actor AppleMessagesService {
             }
         }
 
-        let rows = await Task.detached(priority: .utility) {
-            Self.collectAttributedBodyRowsByIds(dbPath: dbCopyPath, rowids: unique)
+        let rows = try await Task.detached(priority: .utility) {
+            try Self.collectAttributedBodyRowsByIds(dbPath: dbCopyPath, rowids: unique)
         }.value
 
         if !rows.isEmpty { ingest(rows) }
+        // Bump watermark to the requested max only on a clean pass —
+        // throws above leave the watermark put so retries re-cover the
+        // same range. A pass that ingested zero rows (all text-only) is
+        // still a clean pass.
         let watermark = max(readLastMessageId(), unique.max() ?? 0)
         writeLastMessageId(watermark)
     }
 
     nonisolated private static func collectAttributedBodyRowsByIds(
         dbPath: String, rowids: [Int64]
-    ) -> [DecodedRow] {
+    ) throws -> [DecodedRow] {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            return []
+            throw NSError(
+                domain: "AppleMessagesService", code: 10,
+                userInfo: [NSLocalizedDescriptionKey: "sqlite_open failed for chat.db copy"]
+            )
         }
         defer { sqlite3_close(db) }
 
@@ -297,7 +300,12 @@ actor AppleMessagesService {
               AND ROWID IN (\(placeholders))
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(
+                domain: "AppleMessagesService", code: 11,
+                userInfo: [NSLocalizedDescriptionKey: "sqlite_prepare failed"]
+            )
+        }
         defer { sqlite3_finalize(stmt) }
         for (i, id) in rowids.enumerated() {
             sqlite3_bind_int64(stmt, Int32(i + 1), id)
@@ -322,59 +330,6 @@ actor AppleMessagesService {
     /// legacy refresh has already covered.
     func currentMessageWatermark() -> Int64 {
         readLastMessageId()
-    }
-
-    /// Fetch decoded text for the given chat.db ROWIDs. Used by the embed
-    /// worker — pulls from the decoded_text cache for attributedBody rows
-    /// and falls back to chat.db's native `text` column for older rows.
-    func fetchTextForRowIds(_ rowids: [Int64]) async -> [Int64: String] {
-        let unique = Array(Set(rowids))
-        guard !unique.isEmpty else { return [:] }
-
-        var out: [Int64: String] = [:]
-        let placeholders = Array(repeating: "?", count: unique.count).joined(separator: ",")
-
-        // 1) decoded_text cache (already-decoded attributedBody rows).
-        if let idx = indexDb {
-            let sql = "SELECT message_id, text FROM decoded_text WHERE message_id IN (\(placeholders))"
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(idx, sql, -1, &stmt, nil) == SQLITE_OK {
-                for (i, id) in unique.enumerated() {
-                    sqlite3_bind_int64(stmt, Int32(i + 1), id)
-                }
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    let id = sqlite3_column_int64(stmt, 0)
-                    if let p = sqlite3_column_text(stmt, 1) {
-                        out[id] = String(cString: p)
-                    }
-                }
-            }
-            sqlite3_finalize(stmt)
-        }
-
-        // 2) chat.db.text fallback for any rowid we don't yet have.
-        let missing = unique.filter { out[$0] == nil }
-        guard !missing.isEmpty, let tmp = copyChatDb() else { return out }
-        defer { Self.cleanupTempDb(tmp) }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(tmp, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return out }
-        defer { sqlite3_close(db) }
-
-        let phMissing = Array(repeating: "?", count: missing.count).joined(separator: ",")
-        let sql = "SELECT ROWID, text FROM message WHERE ROWID IN (\(phMissing)) AND text IS NOT NULL"
-        var stmt: OpaquePointer?
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return out }
-        for (i, id) in missing.enumerated() {
-            sqlite3_bind_int64(stmt, Int32(i + 1), id)
-        }
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let id = sqlite3_column_int64(stmt, 0)
-            if let p = sqlite3_column_text(stmt, 1) {
-                out[id] = String(cString: p)
-            }
-        }
-        return out
     }
 
     /// Producer-side: list chat.db ROWIDs strictly greater than `since`.

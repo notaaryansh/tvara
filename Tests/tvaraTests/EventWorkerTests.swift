@@ -64,7 +64,7 @@ final class EventWorkerTests: XCTestCase {
         let runner = WorkerRunner(bus: bus, worker: worker)
 
         for i in 0..<5 {
-            await bus.enqueue(
+            _ = try await bus.enqueue(
                 type: EventType.fileAdded, source: EventSource.fs,
                 payload: "{}", dedupeKey: "f\(i)"
             )
@@ -84,16 +84,21 @@ final class EventWorkerTests: XCTestCase {
         let worker = FakeWorker(eventType: EventType.fileAdded, failuresLeft: 1)
         let runner = WorkerRunner(bus: bus, worker: worker)
 
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "retry"
         )
         await runner.start()
 
-        // Wait for the first attempt to fire and throw — that's when fail
-        // schedules the backoff. Then zero the backoff so the retry can
-        // fire immediately, and wait for it to complete.
-        try await waitUntil(timeout: 2.0) { worker.attemptCount >= 1 }
+        // Wait for `bus.fail` to actually bump `attempts` for our row
+        // before clearing backoff. Asserting on `attemptCount` (worker
+        // side) raced because the worker increments that *before* the
+        // runner calls `fail` — `_testClearBackoff` could win and then
+        // `fail` would re-set `not_before` to ~2s, stalling the retry
+        // past the test timeout.
+        try await waitUntil(timeout: 2.0) {
+            await bus._testAttempts(dedupeKey: "retry") >= 1
+        }
         await bus._testClearBackoff()
         try await waitUntil(timeout: 2.0) { worker.processed.count == 1 }
         await runner.stop()
@@ -111,7 +116,7 @@ final class EventWorkerTests: XCTestCase {
         await runner.stop()
 
         // After stop, enqueueing should NOT result in processing.
-        await bus.enqueue(
+        _ = try await bus.enqueue(
             type: EventType.fileAdded, source: EventSource.fs,
             payload: "{}", dedupeKey: "post-stop"
         )

@@ -54,13 +54,22 @@ actor IMessageProducer {
 
         for id in newIds {
             let payload = MessageAddedPayload(rowid: id, chatId: nil)
-            await bus.enqueue(
-                type: EventType.messageAdded,
-                source: EventSource.imessage,
-                payload: payload,
-                dedupeKey: "imessage:\(id)"
-            )
-            if id > lastEmittedRowId { lastEmittedRowId = id }
+            do {
+                // Persisted (rowid) or deduped (nil) both mean "in the
+                // queue, safe to advance". A throw means the insert
+                // didn't land — leave the watermark alone so the next
+                // poll retries this rowid.
+                _ = try await bus.enqueue(
+                    type: EventType.messageAdded,
+                    source: EventSource.imessage,
+                    payload: payload,
+                    dedupeKey: "imessage:\(id)"
+                )
+                if id > lastEmittedRowId { lastEmittedRowId = id }
+            } catch {
+                NSLog("IMessageProducer enqueue failed at rowid=%lld: %@", id, "\(error)")
+                return
+            }
         }
     }
 }
