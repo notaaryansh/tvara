@@ -13,6 +13,14 @@ final class AppSearchService {
     struct AppEntry: Sendable {
         let name: String
         let path: String
+        /// `name.lowercased()` precomputed once at warmCache time. Skipping
+        /// this per-keystroke recomputation eliminates ~300 string
+        /// allocations on the search hot path.
+        let nameLower: String
+        /// First letter of each word in `nameLower`, joined. `""` when the
+        /// name is a single word (no acronym to form). Precomputed at the
+        /// same time as `nameLower` so the scoring loop is allocation-free.
+        let acronym: String
     }
 
     private var cache: [AppEntry] = []
@@ -71,7 +79,10 @@ final class AppSearchService {
         scored.reserveCapacity(cache.count / 4)
 
         for app in cache {
-            let nameLower = app.name.lowercased()
+            // nameLower / acronym are precomputed at warmCache time, so
+            // the loop is allocation-free on the hot keystroke path.
+            let nameLower = app.nameLower
+            let acro = app.acronym
             let rank: Int
             // Tier hierarchy:
             //   1500 — full name equals query exactly ("notion" → Notion.app)
@@ -88,7 +99,6 @@ final class AppSearchService {
             //          since the user is visually scanning a short candidate list.
             //    380 — any word in the name has the query as a prefix
             //    220 — name contains the query as a substring
-            let acro = Self.acronym(of: nameLower)
             if nameLower == q                                   { rank = 1500 }
             else if !acro.isEmpty && acro == q                  { rank = 1400 }
             else if wordEqualMatch(nameLower, q)                { rank = 1300 }
@@ -110,9 +120,8 @@ final class AppSearchService {
             if budget > 0 {
                 var fuzzy: [(AppEntry, Int)] = []
                 for app in cache {
-                    let nameLower = app.name.lowercased()
                     if let dist = FuzzyMatch.levenshtein(
-                        q, nameLower, budget: budget
+                        q, app.nameLower, budget: budget
                     ) {
                         fuzzy.append((app, dist))
                     }
@@ -245,9 +254,21 @@ final class AppSearchService {
             let appName = (path as NSString).lastPathComponent
             let trimmed = (appName as NSString).deletingPathExtension
             guard !trimmed.isEmpty else { continue }
-            entries.append(AppEntry(name: trimmed, path: path))
+            entries.append(makeEntry(name: trimmed, path: path))
         }
         return entries
+    }
+
+    /// Build an `AppEntry` with `nameLower` + `acronym` precomputed so the
+    /// hot keystroke loop stays allocation-free.
+    nonisolated private static func makeEntry(name: String, path: String) -> AppEntry {
+        let lower = name.lowercased()
+        return AppEntry(
+            name: name,
+            path: path,
+            nameLower: lower,
+            acronym: acronym(of: lower)
+        )
     }
 
     /// Shell out to `mdfind` for every `.app` bundle on the local volume.
@@ -308,7 +329,7 @@ final class AppSearchService {
                 guard seen.insert(path).inserted else { continue }
                 let appName = (name as NSString).deletingPathExtension
                 guard !appName.isEmpty else { continue }
-                entries.append(AppEntry(name: appName, path: path))
+                entries.append(makeEntry(name: appName, path: path))
                 continue
             }
             // Descend one level into top-level sub-folders so Utilities/
