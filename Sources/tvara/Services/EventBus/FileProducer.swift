@@ -37,18 +37,26 @@ actor FileProducer {
         let bus = self.bus
         let watcher = FSEventsWatcher(paths: paths) { path in
             guard Self.shouldEnqueue(path: path) else { return }
-            // Include the integer mtime in the dedupe key so a later save
-            // to the same path produces a fresh event. Path-only dedupe
-            // would permanently suppress updates after the first event.
+            // Microsecond mtime in the dedupe key so a later save to the
+            // same path produces a fresh event. Path-only dedupe would
+            // permanently suppress updates after the first event;
+            // second-level bucketing would also drop a second save that
+            // landed in the same wall-clock second.
             let mtime = Self.mtimeBucket(path: path)
             Task.detached(priority: .utility) {
                 let payload = FileAddedPayload(path: path)
-                _ = try? await bus.enqueue(
-                    type: EventType.fileAdded,
-                    source: EventSource.fs,
-                    payload: payload,
-                    dedupeKey: "fs:\(path):\(mtime)"
-                )
+                do {
+                    _ = try await bus.enqueue(
+                        type: EventType.fileAdded,
+                        source: EventSource.fs,
+                        payload: payload,
+                        dedupeKey: "fs:\(path):\(mtime)"
+                    )
+                } catch {
+                    // Surface persistence failures so a silently broken
+                    // bus doesn't manifest as "files just stop indexing".
+                    NSLog("FileProducer enqueue failed for %@: %@", path, "\(error)")
+                }
             }
         }
         watcher.start()
@@ -68,11 +76,13 @@ actor FileProducer {
         return true
     }
 
-    /// Integer mtime (seconds) used as the dedupe bucket. Missing/unreadable
-    /// → 0 so callers still get a stable key per path.
+    /// Microsecond mtime used as the dedupe bucket. APFS stores mtime at
+    /// nanosecond precision, so two saves landing inside the same wall-
+    /// clock second still get distinct keys. Missing/unreadable → 0 so
+    /// callers still get a stable key per path.
     nonisolated static func mtimeBucket(path: String) -> Int64 {
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)
         let date = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        return Int64(date)
+        return Int64(date * 1_000_000)
     }
 }
