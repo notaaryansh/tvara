@@ -373,3 +373,44 @@ Things to watch as the indexes grow:
 5. **Smart search latency variance** — gpt-4o-mini can spike to >2s under
    load. The "Thinking…" spinner shows; consider a 1s fallback to
    keyword-only if the planner doesn't return.
+
+---
+
+## Push-based ingestion (event queue)
+
+Historically every source self-refreshed on the search hot-path —
+`refreshIfNeeded()` with a 60–300s debounce, triggered by the next query.
+A new message wasn't searchable until someone *searched*, and the refresh
+cost (chat.db copy, FSEvents scan, OpenAI embedding) was paid on the
+critical path of a key press.
+
+The `EventBus` pipeline (`Sources/tvara/Services/EventBus/`) flips this to
+push:
+
+- **Producers** detect new content (iMessage ROWID poll every 5s,
+  FSEvents on `~/Pictures` / `~/Downloads` / `~/Desktop` /
+  `~/Documents`) and `enqueue` typed events into `events.db`.
+- **Workers** consume events of a single type in background tasks,
+  delegating to the existing source-specific indexer
+  (`AppleMessagesService.indexRowIds`, `ImageIndexService.indexPath`,
+  …). Embedding is its own event type — `embed_message` — so OpenAI
+  latency doesn't block FTS freshness.
+- **Crash safety** is built into the bus: rows in `processing` longer
+  than 5 min revert to `pending` on the next open. Exponential backoff
+  caps at 5 minutes per attempt and finalises as `failed` after 5
+  attempts. The dedupe-key UNIQUE constraint makes producer re-emission
+  a silent no-op.
+
+Migration is gradual: `EventBusConfig.legacyPullRefreshEnabled` defaults
+to true while the queue bakes. Both paths writing to the same per-source
+SQLite index is safe (INSERT OR REPLACE everywhere). Flip the flag to
+false once the queue is trusted for the migrated source.
+
+### Per-source freshness budget
+
+| Source | Producer | Steady-state latency new-content → searchable |
+|---|---|---|
+| iMessage | ROWID watermark poll, 5s | ≤ 5s + worker batch |
+| Files | FSEvents on home dirs, 1s coalesce | ≤ 2s |
+| Images | FSEvents on image dirs | ≤ 2s + ~100ms CLIP encode |
+| Message embeddings | downstream of `message_added` | bounded by OpenAI batch (~300ms / 50 msgs) |

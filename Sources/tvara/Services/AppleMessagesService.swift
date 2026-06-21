@@ -221,6 +221,13 @@ actor AppleMessagesService {
     // MARK: - Refresh / build decoded-text cache
 
     private func refreshIfNeeded() async {
+        // Migration safety net: the EventBus + IMessageProducer path now
+        // delivers new chat.db ROWIDs as events. The legacy bulk path
+        // remains as a fallback while the queue bakes — gate via
+        // `EventBusConfig.legacyPullRefreshEnabled` so we can flip it off
+        // once the queue is trusted.
+        guard EventBusConfig.legacyPullRefreshEnabled else { return }
+
         if let t = lastBuildCheck, Date().timeIntervalSince(t) < Self.refreshLifetime {
             return
         }
@@ -233,6 +240,180 @@ actor AppleMessagesService {
         await task.value
         buildTask = nil
         lastBuildCheck = Date()
+    }
+
+    /// Queue-driven entry point: decode + ingest a specific batch of
+    /// chat.db ROWIDs. Idempotent (INSERT OR REPLACE) so re-processing a
+    /// `message_added` event after a crash is safe. Bumps the legacy
+    /// `last_message_id` watermark so the pull-path skips work the queue
+    /// has already done.
+    func indexRowIds(_ rowids: [Int64]) async {
+        let unique = Array(Set(rowids))
+        guard !unique.isEmpty else { return }
+
+        let chatPath = chatDbPath
+        let dbCopyPath = NSTemporaryDirectory()
+            + "spotlight_imsg_queue_\(UUID().uuidString).db"
+        do {
+            try FileManager.default.copyItem(atPath: chatPath, toPath: dbCopyPath)
+        } catch {
+            return
+        }
+        if FileManager.default.fileExists(atPath: chatPath + "-wal") {
+            try? FileManager.default.copyItem(
+                atPath: chatPath + "-wal", toPath: dbCopyPath + "-wal"
+            )
+        }
+        defer {
+            for s in ["", "-wal", "-shm"] {
+                try? FileManager.default.removeItem(atPath: dbCopyPath + s)
+            }
+        }
+
+        let rows = await Task.detached(priority: .utility) {
+            Self.collectAttributedBodyRowsByIds(dbPath: dbCopyPath, rowids: unique)
+        }.value
+
+        if !rows.isEmpty { ingest(rows) }
+        let watermark = max(readLastMessageId(), unique.max() ?? 0)
+        writeLastMessageId(watermark)
+    }
+
+    nonisolated private static func collectAttributedBodyRowsByIds(
+        dbPath: String, rowids: [Int64]
+    ) -> [DecodedRow] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let placeholders = Array(repeating: "?", count: rowids.count).joined(separator: ",")
+        let sql = """
+            SELECT ROWID, attributedBody
+            FROM message
+            WHERE text IS NULL
+              AND attributedBody IS NOT NULL
+              AND ROWID IN (\(placeholders))
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        for (i, id) in rowids.enumerated() {
+            sqlite3_bind_int64(stmt, Int32(i + 1), id)
+        }
+
+        var rows: [DecodedRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            guard let bytes = sqlite3_column_blob(stmt, 1) else { continue }
+            let len = Int(sqlite3_column_bytes(stmt, 1))
+            guard len > 0 else { continue }
+            let blob = Data(bytes: bytes, count: len)
+            if let text = decodeAttributedBody(blob), !text.isEmpty {
+                rows.append(DecodedRow(messageId: id, text: text))
+            }
+        }
+        return rows
+    }
+
+    /// Read the producer's chat.db ROWID ceiling for the queue path.
+    /// Producers consult this so they don't re-emit events for rows the
+    /// legacy refresh has already covered.
+    func currentMessageWatermark() -> Int64 {
+        readLastMessageId()
+    }
+
+    /// Fetch decoded text for the given chat.db ROWIDs. Used by the embed
+    /// worker — pulls from the decoded_text cache for attributedBody rows
+    /// and falls back to chat.db's native `text` column for older rows.
+    func fetchTextForRowIds(_ rowids: [Int64]) async -> [Int64: String] {
+        let unique = Array(Set(rowids))
+        guard !unique.isEmpty else { return [:] }
+
+        var out: [Int64: String] = [:]
+        let placeholders = Array(repeating: "?", count: unique.count).joined(separator: ",")
+
+        // 1) decoded_text cache (already-decoded attributedBody rows).
+        if let idx = indexDb {
+            let sql = "SELECT message_id, text FROM decoded_text WHERE message_id IN (\(placeholders))"
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(idx, sql, -1, &stmt, nil) == SQLITE_OK {
+                for (i, id) in unique.enumerated() {
+                    sqlite3_bind_int64(stmt, Int32(i + 1), id)
+                }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let id = sqlite3_column_int64(stmt, 0)
+                    if let p = sqlite3_column_text(stmt, 1) {
+                        out[id] = String(cString: p)
+                    }
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        // 2) chat.db.text fallback for any rowid we don't yet have.
+        let missing = unique.filter { out[$0] == nil }
+        guard !missing.isEmpty, let tmp = copyChatDb() else { return out }
+        defer { Self.cleanupTempDb(tmp) }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(tmp, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return out }
+        defer { sqlite3_close(db) }
+
+        let phMissing = Array(repeating: "?", count: missing.count).joined(separator: ",")
+        let sql = "SELECT ROWID, text FROM message WHERE ROWID IN (\(phMissing)) AND text IS NOT NULL"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return out }
+        for (i, id) in missing.enumerated() {
+            sqlite3_bind_int64(stmt, Int32(i + 1), id)
+        }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            if let p = sqlite3_column_text(stmt, 1) {
+                out[id] = String(cString: p)
+            }
+        }
+        return out
+    }
+
+    /// Producer-side: list chat.db ROWIDs strictly greater than `since`.
+    /// Returns ROWID-only (no decoding). Caller batches them into events.
+    func fetchNewRowIds(since: Int64, limit: Int = 500) async -> [Int64] {
+        guard FileManager.default.fileExists(atPath: chatDbPath),
+              let tmpDb = copyChatDb() else { return [] }
+        defer { Self.cleanupTempDb(tmpDb) }
+        return await Task.detached(priority: .utility) {
+            Self.fetchRowIds(dbPath: tmpDb, since: since, limit: limit)
+        }.value
+    }
+
+    nonisolated private static func fetchRowIds(
+        dbPath: String, since: Int64, limit: Int
+    ) -> [Int64] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT ROWID FROM message
+            WHERE ROWID > ?
+            ORDER BY ROWID ASC
+            LIMIT ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, since)
+        sqlite3_bind_int(stmt, 2, Int32(limit))
+
+        var ids: [Int64] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            ids.append(sqlite3_column_int64(stmt, 0))
+        }
+        return ids
     }
 
     private func runIncrementalBuild() async {

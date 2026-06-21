@@ -523,6 +523,18 @@ actor ImageIndexService {
         return true
     }
 
+    /// Queue-driven entry point: index one path. Loads CoreML models on
+    /// first call. Skips paths whose extension isn't a supported image
+    /// type. Idempotent — `indexOne` upserts on path.
+    func indexPath(_ path: String) async {
+        let url = URL(fileURLWithPath: path)
+        guard allowedExts.contains(url.pathExtension.lowercased()) else { return }
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        guard await ensureModels() else { return }
+        guard needsIndex(url) else { return }
+        indexOne(url)
+    }
+
     private func indexOne(_ url: URL) {
         guard let cg = CGImageSourceCreateWithURL(url as CFURL, nil).flatMap({ CGImageSourceCreateImageAtIndex($0, 0, nil) }) else {
             return

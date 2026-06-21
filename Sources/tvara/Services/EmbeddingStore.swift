@@ -22,17 +22,28 @@ actor EmbeddingStore {
     private static let embeddingsEndpoint =
         URL(string: "https://api.openai.com/v1/embeddings")!
 
-    init() {
-        let supportDir = NSHomeDirectory()
-            + "/Library/Application Support/tvara"
-        try? FileManager.default.createDirectory(
-            atPath: supportDir, withIntermediateDirectories: true
-        )
-        self.dbPath = supportDir + "/embeddings.db"
+    init(dbPath: String? = nil) {
+        if let dbPath {
+            self.dbPath = dbPath
+        } else {
+            let supportDir = NSHomeDirectory()
+                + "/Library/Application Support/tvara"
+            try? FileManager.default.createDirectory(
+                atPath: supportDir, withIntermediateDirectories: true
+            )
+            self.dbPath = supportDir + "/embeddings.db"
+        }
 
+        // R/W + CREATE so the queue-driven embed worker can populate this
+        // even on fresh installs that never ran the Python bulk script.
         var handle: OpaquePointer?
-        if sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
+        if sqlite3_open_v2(
+            self.dbPath, &handle,
+            SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
+            nil
+        ) == SQLITE_OK {
             self.db = handle
+            Self.bootstrapSchema(handle)
         } else {
             self.db = nil
         }
@@ -40,6 +51,77 @@ actor EmbeddingStore {
 
     deinit {
         if let db { sqlite3_close(db) }
+    }
+
+    nonisolated private static func bootstrapSchema(_ db: OpaquePointer?) {
+        // Mirrors `scripts/embed_messages.py` — the Python bulk path and
+        // the queue path write to the same shape.
+        for s in [
+            "PRAGMA journal_mode=WAL",
+            "PRAGMA synchronous=NORMAL",
+            """
+            CREATE TABLE IF NOT EXISTS embeddings (
+                message_id  TEXT NOT NULL,
+                source      TEXT NOT NULL,
+                model       TEXT NOT NULL,
+                dim         INTEGER NOT NULL,
+                embedding   BLOB NOT NULL,
+                embedded_at INTEGER NOT NULL,
+                PRIMARY KEY (message_id, source, model)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_embeddings_source_model ON embeddings(source, model)",
+        ] { sqlite3_exec(db, s, nil, nil, nil) }
+    }
+
+    /// Queue-path write. Replaces an existing (message_id, source, model)
+    /// row so re-embedding is safe.
+    func upsert(
+        messageId: String,
+        source: String,
+        model: String,
+        embedding: [Float]
+    ) {
+        guard let db, !embedding.isEmpty else { return }
+        let sql = """
+        INSERT OR REPLACE INTO embeddings
+        (message_id, source, model, dim, embedding, embedded_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        sqlite3_bind_text(stmt, 1, messageId, -1, SQLITE_TRANSIENT_ES)
+        sqlite3_bind_text(stmt, 2, source, -1, SQLITE_TRANSIENT_ES)
+        sqlite3_bind_text(stmt, 3, model, -1, SQLITE_TRANSIENT_ES)
+        sqlite3_bind_int(stmt, 4, Int32(embedding.count))
+        embedding.withUnsafeBufferPointer { buf in
+            let byteCount = buf.count * MemoryLayout<Float>.size
+            sqlite3_bind_blob(stmt, 5, buf.baseAddress, Int32(byteCount), SQLITE_TRANSIENT_ES)
+        }
+        sqlite3_bind_int64(stmt, 6, Int64(Date().timeIntervalSince1970))
+        sqlite3_step(stmt)
+    }
+
+    /// Embed a batch of input strings via OpenAI. Returns one vector per
+    /// input, in the same order. Throws on any non-200 response.
+    func embedBatch(_ inputs: [String], apiKey: String) async throws -> [[Float]] {
+        guard !inputs.isEmpty else { return [] }
+        let body: [String: Any] = ["model": Self.model, "input": inputs]
+        var request = URLRequest(url: Self.embeddingsEndpoint)
+        request.httpMethod = "POST"
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 30
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let preview = String(data: data, encoding: .utf8)?.prefix(200) ?? ""
+            throw EmbeddingError.api("status=\(((response as? HTTPURLResponse)?.statusCode).map(String.init) ?? "?") body=\(preview)")
+        }
+        let parsed = try JSONDecoder().decode(EmbedResponse.self, from: data)
+        return parsed.data.map(\.embedding)
     }
 
     /// True when the embeddings db exists and has at least one Discord row.

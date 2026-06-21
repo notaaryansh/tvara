@@ -169,6 +169,11 @@ final class SearchViewModel: ObservableObject {
     private let imageService: ImageIndexService
     private let windowService: WindowManagerService
     private let settingsService: SystemSettingsService
+
+    /// Push-based ingestion pipeline. Held as a property so its
+    /// producers/workers/FSEvents watchers stay alive for the lifetime
+    /// of the search panel rather than dying with a setup closure.
+    private let eventBusPipeline: EventBusPipeline
     private let folderService: FoldersService
     private let systemActionsService: SystemActionsService
     private let smartService: SmartSearchService
@@ -246,6 +251,10 @@ final class SearchViewModel: ObservableObject {
         self.imageService = imageService
         self.windowService = windowService
         self.settingsService = settingsService
+        self.eventBusPipeline = EventBusPipeline(
+            imessage: imessageService,
+            images: imageService
+        )
         self.folderService = folderService
         self.systemActionsService = systemActionsService
         self.smartService = smartService
@@ -282,6 +291,9 @@ final class SearchViewModel: ObservableObject {
         Task { [clipboardService] in await clipboardService.start() }
         Task { [whatsappService] in await whatsappService.warmCache() }
         Task { [imessageService] in await imessageService.warmCache() }
+        // Push-based ingestion pipeline. Held as `eventBusPipeline` so its
+        // producers + FSEvents watchers stay alive past this setup block.
+        Task { [eventBusPipeline] in await eventBusPipeline.start() }
         Task { [mailService] in await mailService.warmCache() }
         Task { [smartService] in await smartService.warmCache() }
         Task { [fileService] in await fileService.warmCache() }
