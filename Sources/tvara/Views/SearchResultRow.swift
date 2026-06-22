@@ -48,6 +48,11 @@ struct SearchResultRow: View {
                 .padding(.horizontal, 6)
         )
         .contentShape(Rectangle())
+        // Subtle visual treatment for fuzzy results so the user can
+        // tell at a glance that "Did you mean?" results are below the
+        // exact matches. Dimming the whole row by 25% reads as quieter
+        // chrome without breaking layout or icon legibility.
+        .opacity(result.isFuzzyMatch ? 0.7 : 1.0)
     }
 
     @ViewBuilder

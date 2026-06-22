@@ -1192,16 +1192,28 @@ final class SearchViewModel: ObservableObject {
             }
         }
 
-        // Fuzzy suppression: if ANY non-fuzzy match exists across all
-        // sections, drop fuzzy matches everywhere. Fuzzy is a typo-
-        // tolerant fallback — only visible when nothing else matched.
-        let hasNonFuzzy = sections.flatMap(\.items)
-            .contains(where: { !$0.isFuzzyMatch })
-        if hasNonFuzzy {
-            sections = sections.compactMap { sec in
-                let filtered = sec.items.filter { !$0.isFuzzyMatch }
-                return filtered.isEmpty ? nil : BlendedSection(kind: sec.kind, items: filtered)
-            }
+        // Per-source fuzzy policy.
+        //
+        // Command-style sections (`.apps` — covers apps, windows,
+        // settings, folders, system actions, third-party shortcuts):
+        // commands are precision-driven. A clean exact match means the
+        // user wants exactly that — typo guesses alongside it are
+        // noise, so suppress fuzzy in this section when any non-fuzzy
+        // result exists.
+        //
+        // Content sections (messages/mail/notes/images/files/clipboard):
+        // recall-driven. Show fuzzy results alongside exact ones —
+        // each source ranks its fuzzy hits in a tier strictly below
+        // its exact band (e.g. ImageIndexService rank tiers 100/600/900
+        // for fuzzy vs `Int(fusedScore * 100_000)` for exact), so the
+        // ordering is correct by construction.
+        let suppressFuzzyIfMixed: Set<BlendedSection.Kind> = [.apps]
+        sections = sections.compactMap { sec in
+            guard suppressFuzzyIfMixed.contains(sec.kind) else { return sec }
+            let hasNonFuzzy = sec.items.contains(where: { !$0.isFuzzyMatch })
+            guard hasNonFuzzy else { return sec }
+            let filtered = sec.items.filter { !$0.isFuzzyMatch }
+            return filtered.isEmpty ? nil : BlendedSection(kind: sec.kind, items: filtered)
         }
 
         return sections

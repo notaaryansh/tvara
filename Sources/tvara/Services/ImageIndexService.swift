@@ -2,6 +2,7 @@ import Accelerate
 import AppKit
 import CoreImage
 import CoreML
+import CSQLiteSpellfix
 import Foundation
 import SQLite3
 import Vision
@@ -62,6 +63,18 @@ actor ImageIndexService {
 
         var handle: OpaquePointer?
         if sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK {
+            // Statically-linked spellfix1 extension. Installs the
+            // `spellfix1` virtual-table module on this connection so
+            // `CREATE VIRTUAL TABLE … USING spellfix1` becomes legal
+            // below. Failing silently here would surface as a confusing
+            // "no such module: spellfix1" error in createSchema; log so
+            // the cause is visible.
+            if let h = handle {
+                let rc = csqlite_spellfix_install(UnsafeMutableRawPointer(h))
+                if rc != SQLITE_OK {
+                    NSLog("ImageIndexService: csqlite_spellfix_install failed rc=%d", rc)
+                }
+            }
             self.db = handle
             Self.createSchema(db: handle)
         }
@@ -134,6 +147,15 @@ actor ImageIndexService {
           INSERT INTO images_fts(rowid, ocr) VALUES (new.id, new.ocr);
         END;
 
+        -- spellfix1 vocabulary over OCR tokens. Each distinct token from
+        -- every image's OCR text gets inserted here once; on query we ask
+        -- spellfix1 for the K nearest neighbours of each typed token
+        -- (Damerau-Levenshtein + phonetic class hash). The `score` column
+        -- is 0 for an exact vocab hit and grows with edit distance, so
+        -- ranking exact-above-fuzzy comes free from sorting by score asc.
+        -- Backfilled from existing `images.ocr` rows by `migrateIfNeeded`.
+        CREATE VIRTUAL TABLE IF NOT EXISTS ocr_vocab USING spellfix1;
+
         -- One-time backfill / migration flags
         CREATE TABLE IF NOT EXISTS meta (
           key   TEXT PRIMARY KEY,
@@ -200,6 +222,53 @@ actor ImageIndexService {
         setMetaValue("rrf_backfill_done", "1")
         loadLabelCache()
         NSLog("ImageIndexService: backfill complete")
+
+        // Separate one-shot: seed the spellfix1 vocab from every existing
+        // image's OCR text. Lives behind its own meta flag so adding the
+        // vocab table to a long-running install doesn't pay the cost on
+        // every launch — only the first.
+        await backfillOCRVocabIfNeeded()
+    }
+
+    /// One-time pass that walks every image's `ocr` text and feeds its
+    /// distinct tokens into `ocr_vocab`. Subsequent indexes feed the vocab
+    /// inline (see `writeOCRVocab` in `upsert`).
+    private func backfillOCRVocabIfNeeded() async {
+        guard let db else { return }
+        if metaValue("spellfix_vocab_backfill_done") == "1" { return }
+
+        var ocrTexts: [String] = []
+        var stmt: OpaquePointer?
+        let sql = "SELECT ocr FROM images WHERE ocr IS NOT NULL AND length(ocr) > 0"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let p = sqlite3_column_text(stmt, 0) {
+                    ocrTexts.append(String(cString: p))
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+        guard !ocrTexts.isEmpty else {
+            setMetaValue("spellfix_vocab_backfill_done", "1")
+            return
+        }
+
+        NSLog("ImageIndexService: seeding ocr_vocab from %d existing rows", ocrTexts.count)
+        // Single big transaction — spellfix1 INSERTs are cheap but the
+        // per-row commit overhead at this volume isn't.
+        sqlite3_exec(db, "BEGIN", nil, nil, nil)
+        var done = 0
+        for text in ocrTexts {
+            writeOCRVocab(text)
+            done += 1
+            if done % 500 == 0 {
+                NSLog("ImageIndexService: ocr_vocab backfill %d/%d", done, ocrTexts.count)
+                await Task.yield()
+            }
+        }
+        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        setMetaValue("spellfix_vocab_backfill_done", "1")
+        NSLog("ImageIndexService: ocr_vocab backfill complete")
     }
 
     private func metaValue(_ key: String) -> String? {
@@ -263,11 +332,7 @@ actor ImageIndexService {
         if labelCache.isEmpty { loadLabelCache() }
 
         // ─── Pull every image row's (id, path, ocr, embedding) once ────────
-        struct Row {
-            let id: Int64; let path: String; let ocr: String; let w: Int; let h: Int
-            let imgEmb: [Float]
-        }
-        var rows: [Int64: Row] = [:]
+        var rows: [Int64: ImageRow] = [:]
         var stmt: OpaquePointer?
         let sql = "SELECT id, path, ocr, embedding, width, height FROM images WHERE embedding IS NOT NULL"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -280,7 +345,7 @@ actor ImageIndexService {
                 let buf = UnsafeBufferPointer(start: blob.assumingMemoryBound(to: Float.self), count: 512)
                 let w = Int(sqlite3_column_int(stmt, 4))
                 let h = Int(sqlite3_column_int(stmt, 5))
-                rows[id] = Row(id: id, path: path, ocr: ocr, w: w, h: h, imgEmb: Array(buf))
+                rows[id] = ImageRow(id: id, path: path, ocr: ocr, w: w, h: h, imgEmb: Array(buf))
             }
         }
         sqlite3_finalize(stmt)
@@ -394,8 +459,133 @@ actor ImageIndexService {
             )
         }
         mark("results+thumbnails (n=\(results.count))")
+
+        // ─── Signal 4: fuzzy OCR via spellfix1 ────────────────────────────
+        // Catches both user typos ("tomijazz" → "tomljazz") AND OCR errors
+        // ("tomi jazz" mis-read as "tomljazz" by Vision). spellfix1 is an
+        // indexed Damerau-Levenshtein + phonetic-class lookup over the OCR
+        // vocabulary — much cheaper than running Levenshtein per-token at
+        // query time.
+        //
+        // Capped at 3 results per query, ranked in a band STRICTLY below
+        // anything the exact pipeline could produce, and dedup'd against
+        // the exact result set so a strong fuzzy candidate can't double-
+        // up on a row the exact pass already returned.
+        let exactIds: Set<Int64> = Set(results.compactMap { res -> Int64? in
+            // Recover the image id from the result set. fused.compactMap
+            // dropped ids the exact pipeline didn't surface; this set
+            // exists just to skip them in the fuzzy pass below.
+            guard case .file(let p) = res.openTarget else { return nil }
+            return rows.first(where: { $0.value.path == p })?.key
+        })
+        let fuzzyResults = fuzzyOCRSearch(
+            query: trimmed,
+            rows: rows,
+            excluding: exactIds
+        )
+        mark("fuzzy OCR (n=\(fuzzyResults.count))")
+
         NSLog("ImageSearch: TOTAL %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        return results
+        return results + fuzzyResults
+    }
+
+    /// Run the fuzzy OCR pass. Expands every query token via spellfix1 to
+    /// get its K nearest vocab neighbours, then BM25s the OR-joined
+    /// expansion against `images_fts`. Returns up to 3 results, ranked in
+    /// `[100, 900]` so they never out-rank the exact pipeline.
+    private func fuzzyOCRSearch(
+        query: String,
+        rows: [Int64: ImageRow],
+        excluding exactIds: Set<Int64>
+    ) -> [SearchResult] {
+        guard let db else { return [] }
+        let queryTokens = Self.vocabTokens(from: query)
+        guard !queryTokens.isEmpty else { return [] }
+
+        // 1. spellfix1 expansion. Per token, fetch K nearest vocab words
+        //    with `score > 0` (exact-vocab hits are already covered by
+        //    the regular BM25 pass — we only need the fuzzy tail).
+        var expanded: Set<String> = []
+        for token in queryTokens {
+            let candidates = spellfixCandidates(for: token, top: 5)
+            for cand in candidates where cand != token {
+                expanded.insert(cand)
+            }
+        }
+        guard !expanded.isEmpty else { return [] }
+
+        // 2. BM25 over the expansion. FTS5 OR-joins are token-level, so a
+        //    single MATCH string with all candidates returns one ranked
+        //    list. Limit to a small top-N — we only emit 3 anyway, so
+        //    pulling more would be wasted reads.
+        let fts = expanded.joined(separator: " OR ")
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = "SELECT rowid, bm25(images_fts) FROM images_fts WHERE images_fts MATCH ? ORDER BY bm25(images_fts) LIMIT 30"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_text(stmt, 1, fts, -1, SQLITE_TRANSIENT_IMG)
+
+        var hits: [(Int64, Float)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            if exactIds.contains(id) { continue }
+            // FTS5 BM25 is signed-negative; flip so larger == better.
+            let score = Float(-sqlite3_column_double(stmt, 1))
+            hits.append((id, score))
+        }
+
+        // 3. Pick top 3, emit with a low rank band (100, 600, 900) so
+        //    fuzzy stays structurally below any exact result. Tiers are
+        //    spread out so the visual ordering reads cleanly even when
+        //    BM25 differences are small.
+        let top = Array(hits.prefix(3))
+        var out: [SearchResult] = []
+        let fuzzyRankTiers = [900, 600, 300]
+        for (idx, (imageID, _)) in top.enumerated() {
+            guard let r = rows[imageID] else { continue }
+            let snippet = r.ocr.trimmingCharacters(in: .whitespacesAndNewlines)
+                              .replacingOccurrences(of: "\n", with: " ")
+            let topLabels = topLabelNames(forImage: imageID).joined(separator: ", ")
+            let subtitle: String
+            if !snippet.isEmpty { subtitle = String(snippet.prefix(120)) }
+            else if !topLabels.isEmpty { subtitle = topLabels }
+            else { subtitle = "\(r.w)×\(r.h)" }
+            let iconData = makeThumbnail(path: r.path, maxDim: 256)
+            out.append(SearchResult(
+                title: (r.path as NSString).lastPathComponent,
+                subtitle: subtitle,
+                source: .images,
+                date: nil,
+                badge: "~",
+                openTarget: .file(r.path),
+                rank: fuzzyRankTiers[idx],
+                iconData: iconData,
+                isFuzzyMatch: true
+            ))
+        }
+        return out
+    }
+
+    /// Ask spellfix1 for the top-K vocab words nearest to `token`. Returns
+    /// the words including any exact vocab hit; the caller filters that out
+    /// because the regular BM25 pass already covers exact-token matches.
+    private func spellfixCandidates(for token: String, top: Int) -> [String] {
+        guard let db else { return [] }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        // `top=K` is spellfix1's hidden column for "limit results to K
+        // nearest neighbours". Distinct from SQL LIMIT.
+        let sql = "SELECT word FROM ocr_vocab WHERE word MATCH ? AND top=?"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_text(stmt, 1, token, -1, SQLITE_TRANSIENT_IMG)
+        sqlite3_bind_int(stmt, 2, Int32(top))
+        var out: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let p = sqlite3_column_text(stmt, 0) {
+                out.append(String(cString: p))
+            }
+        }
+        return out
     }
 
     /// Top 3 label names for an image, ordered by stored confidence desc.
@@ -591,6 +781,48 @@ actor ImageIndexService {
 
         guard imageID > 0 else { return }
         writeImageLabels(imageID: imageID, labels: labels)
+        // Feed every distinct OCR token into spellfix1's learned vocab.
+        // Cheap per-call (a handful of tokens, sqlite3_step apiece) and
+        // makes the fuzzy-OCR search path work for new images without
+        // a re-backfill.
+        writeOCRVocab(ocr)
+    }
+
+    /// Tokenise OCR text and insert into the spellfix1 vocabulary table.
+    /// Duplicate words are handled internally by spellfix1 (it bumps the
+    /// word's rank column instead of inserting a second row).
+    private func writeOCRVocab(_ text: String) {
+        guard let db, !text.isEmpty else { return }
+        let tokens = Self.vocabTokens(from: text)
+        guard !tokens.isEmpty else { return }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(
+            db, "INSERT INTO ocr_vocab(word) VALUES (?)",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return }
+        for token in tokens {
+            sqlite3_bind_text(stmt, 1, token, -1, SQLITE_TRANSIENT_IMG)
+            sqlite3_step(stmt)
+            sqlite3_reset(stmt)
+        }
+    }
+
+    /// Split a string into the distinct alphanumeric tokens we feed into
+    /// `ocr_vocab`. 3-char minimum — single letters and 2-char digrams
+    /// blow up the vocabulary without improving fuzzy recall (their
+    /// neighbours are too many to be useful).
+    nonisolated static func vocabTokens(from text: String) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for slice in text.lowercased().split(
+            whereSeparator: { !$0.isLetter && !$0.isNumber }
+        ) {
+            let s = String(slice)
+            guard s.count >= 3 else { continue }
+            if seen.insert(s).inserted { out.append(s) }
+        }
+        return out
     }
 
     /// Wipe and rewrite the image→label many-to-many rows, looking up (and
@@ -835,4 +1067,16 @@ actor ImageIndexService {
 struct LabelHit: Codable {
     let name: String
     let confidence: Float
+}
+
+/// One image's data as pulled in the search-time bulk SELECT. File-private
+/// to the file so both `search()` and `fuzzyOCRSearch` can pass it around
+/// without re-fetching from sqlite.
+fileprivate struct ImageRow {
+    let id: Int64
+    let path: String
+    let ocr: String
+    let w: Int
+    let h: Int
+    let imgEmb: [Float]
 }
