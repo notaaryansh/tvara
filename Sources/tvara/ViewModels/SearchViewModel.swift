@@ -51,23 +51,32 @@ enum ResultsViewMode: Equatable {
 @MainActor
 final class SearchViewModel: ObservableObject {
     @Published var query: String = ""
-    @Published private(set) var browserResults: [SearchResult] = []
-    @Published private(set) var fileResults: [SearchResult] = []
-    @Published private(set) var appResults: [SearchResult] = []
-    @Published private(set) var whatsappResults: [SearchResult] = []
-    @Published private(set) var discordResults: [SearchResult] = []
-    @Published private(set) var imessageResults: [SearchResult] = []
-    @Published private(set) var mailResults: [SearchResult] = []
-    @Published private(set) var notesResults: [SearchResult] = []
-    @Published private(set) var notionResults: [SearchResult] = []
-    @Published private(set) var linearResults: [SearchResult] = []
-    @Published private(set) var spotifyResults: [SearchResult] = []
-    @Published private(set) var clipboardResults: [SearchResult] = []
-    @Published private(set) var imageResults: [SearchResult] = []
-    @Published private(set) var windowResults: [SearchResult] = []
-    @Published private(set) var settingsResults: [SearchResult] = []
-    @Published private(set) var folderResults: [SearchResult] = []
-    @Published private(set) var systemActionResults: [SearchResult] = []
+    @Published private(set) var browserResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var fileResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var appResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var whatsappResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var discordResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var imessageResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var mailResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var notesResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var notionResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var linearResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var spotifyResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var clipboardResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var imageResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var windowResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var settingsResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var folderResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var systemActionResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+
+    /// Memoized result of `blendedSections`. `nil` = stale, recompute on
+    /// next read. Invalidated via `didSet` on every input @Published
+    /// (the 17 source arrays above + `expandedSections` + `loadingSections`).
+    /// Without this, SwiftUI's body re-evaluation called `blendedSections`
+    /// 4-5 times per re-eval, and a single search wave fires ~10 re-evals
+    /// — so the same 8-sort/filter pipeline ran ~40+ times per search.
+    /// With the cache it runs ~10 times per search (once per real change).
+    private var blendedSectionsCache: [BlendedSection]?
     @Published var selectedIndex: Int = 0
     /// When the blended view's currently-selected row is the synthetic
     /// "photo collection" row, this picks which thumb inside the strip
@@ -79,14 +88,18 @@ final class SearchViewModel: ObservableObject {
     /// set, the blended view shows all of its items instead of the
     /// first `blendedMessageSectionCap`. Cleared on every new query
     /// so expansion doesn't bleed across unrelated searches.
-    @Published private(set) var expandedSections: Set<BlendedSection.Kind> = []
+    @Published private(set) var expandedSections: Set<BlendedSection.Kind> = [] {
+        didSet { blendedSectionsCache = nil }
+    }
     @Published private(set) var isLoading: Bool = false
     /// Per-section in-flight set. The blended view reads this to show a
     /// spinner in each section's header WHILE that source is still
     /// loading — so apps can render at t=5ms while images keeps spinning
     /// at t=300ms instead of every section appearing at once. Each per-
     /// source Task in runKeywordSearch removes its kind on completion.
-    @Published private(set) var loadingSections: Set<BlendedSection.Kind> = []
+    @Published private(set) var loadingSections: Set<BlendedSection.Kind> = [] {
+        didSet { blendedSectionsCache = nil }
+    }
     @Published private(set) var isAIThinking: Bool = false
     @Published private(set) var aiExplanation: String? = nil
     @Published var activeTab: SearchTab = .all {
@@ -1075,6 +1088,15 @@ final class SearchViewModel: ObservableObject {
     /// dropped. Used by SearchView for layout AND by `results` (the
     /// flat selection index space) so ↑/↓ keeps walking a single list.
     var blendedSections: [BlendedSection] {
+        if let cached = blendedSectionsCache { return cached }
+        let computed = computeBlendedSections()
+        blendedSectionsCache = computed
+        return computed
+    }
+
+    /// The real implementation. `blendedSections` above caches this so
+    /// SwiftUI's per-render re-evaluation hits the cache, not the work.
+    private func computeBlendedSections() -> [BlendedSection] {
         var sections: [BlendedSection] = []
 
         // ── "Apps" section: apps + always-on commands + third-party

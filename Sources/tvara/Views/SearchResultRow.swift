@@ -55,8 +55,7 @@ struct SearchResultRow: View {
         switch result.openTarget {
         case .file(let path):
             // Image source: render the actual photo thumbnail we baked into
-            // iconData at index time. Falls through to FileIconView for any
-            // non-image file source.
+            // iconData at index time.
             if result.source == .images,
                let data = result.iconData,
                let img = NSImage(data: data) {
@@ -70,7 +69,23 @@ struct SearchResultRow: View {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
                     )
+            } else if result.source == .app,
+                      let data = result.iconData,
+                      let img = NSImage(data: data) {
+                // App source: render the pre-decoded PNG that
+                // AppIconStore baked at warm time. Bypasses
+                // FileIconView/IconCache's lazy `.icns` decode so the
+                // icon lands in the same frame as the row instead of
+                // popping in one frame later.
+                Image(nsImage: img)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 36, height: 36)
             } else {
+                // Fallback for non-image, non-app file rows (and the
+                // brief window on first launch before the app icon
+                // cache has populated). IconCache pre-decodes in the
+                // background so this is usually warm.
                 FileIconView(path: path)
                     .frame(width: 36, height: 36)
             }
