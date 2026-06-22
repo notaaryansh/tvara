@@ -33,6 +33,14 @@ final class AppSearchService {
     private var cacheTime: Date?
     private static let cacheLifetime: TimeInterval = 300   // 5 min
 
+    /// Monotonic id bumped on every `refreshCacheIfNeeded` pass. The
+    /// background icon-enrichment task captures this at dispatch time
+    /// and only swaps its result into `cache` if the generation still
+    /// matches — so a stale enrichment from refresh N can never
+    /// clobber the live cache from refresh N+1, even when the two
+    /// scans happen to have the same path set.
+    private var refreshGeneration: UInt64 = 0
+
     /// On-disk PNG cache shared across launches. Populated lazily in
     /// `refreshCacheIfNeeded`; survives restarts so the second-launch
     /// search renders icons immediately rather than re-encoding ~300
@@ -198,13 +206,15 @@ final class AppSearchService {
         }.value
         cache = scanned
         cacheTime = Date()
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
 
         // 2. Enrich the cache with PNG iconData in the background. On
         //    a warm launch (disk cache hits) this completes in tens
         //    of ms; on a cold launch it takes 1-3s. Either way the
         //    user can already search apps from step 1.
         IconCache.shared.warm(paths: cache.map(\.path))
-        startIconEnrichment(for: scanned)
+        startIconEnrichment(for: scanned, generation: generation)
     }
 
     /// Spawns a background task that hydrates `cache` entries with
@@ -213,7 +223,9 @@ final class AppSearchService {
     /// and persisted in a side task so the enrichment loop isn't gated
     /// on sqlite writes. The enriched cache is published in a single
     /// actor-isolated swap via `replaceCache` once the pass completes.
-    private func startIconEnrichment(for scanned: [AppEntry]) {
+    /// `generation` is the refresh id at dispatch time — `replaceCache`
+    /// drops the result if a fresher refresh has bumped it since.
+    private func startIconEnrichment(for scanned: [AppEntry], generation: UInt64) {
         let iconStore = self.iconStore
         Task { [weak self] in
             let cached = await iconStore.bulkFetch(paths: scanned.map(\.path))
@@ -250,20 +262,19 @@ final class AppSearchService {
                 }
                 return out
             }.value
-            await self?.replaceCache(enriched)
+            await self?.replaceCache(enriched, generation: generation)
             await iconStore.prune(keepPaths: Set(scanned.map(\.path)))
         }
     }
 
-    /// Actor-isolated cache swap. Called by the enrichment task once
-    /// every entry has its `iconData` populated. Skipped if a fresher
-    /// refresh has already run (newer `cacheTime` since the swap was
-    /// dispatched) — otherwise we'd clobber the latest scan with a
-    /// stale enrichment from a prior run.
-    private func replaceCache(_ enriched: [AppEntry]) {
-        // Match by path-set: if the path set differs, a newer refresh
-        // ran and the stale enrichment doesn't apply.
-        guard Set(enriched.map(\.path)) == Set(cache.map(\.path)) else { return }
+    /// Actor-isolated cache swap. Drops the result when `generation`
+    /// no longer matches `refreshGeneration` — a fresher refresh has
+    /// run since this enrichment was dispatched and its result is the
+    /// one that should win. A monotonic id beats a path-set guard
+    /// because two back-to-back refreshes with the same install set
+    /// would otherwise let a stale enrichment clobber a newer one.
+    private func replaceCache(_ enriched: [AppEntry], generation: UInt64) {
+        guard generation == refreshGeneration else { return }
         cache = enriched
     }
 
