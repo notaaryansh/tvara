@@ -198,11 +198,12 @@ func encodeAppIconPNG(path: String, maxDim: CGFloat = AppIconStore.pngMaxDim) ->
 }
 
 /// Best-effort bundle mtime used as the cache freshness key. App
-/// updates rewrite the bundle directory so the mtime moves; if we
-/// can't stat the path we fall back to 0 (never matches a cached
-/// mtime, so the icon gets re-encoded next time).
-func bundleMtimeSeconds(path: String) -> Double {
+/// updates rewrite the bundle directory so the mtime moves. Returns
+/// `nil` when stat fails so callers skip the disk-cache lookup AND
+/// the persist — otherwise the failure would write `mtime = 0` once
+/// and then match itself forever, freezing whatever (possibly stale
+/// or nil) icon got cached on that first failed pass.
+func bundleMtimeSeconds(path: String) -> Double? {
     let attrs = try? FileManager.default.attributesOfItem(atPath: path)
-    let date = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-    return date
+    return (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970
 }

@@ -186,60 +186,85 @@ final class AppSearchService {
             return
         }
 
-        // 1. Scan installed apps off main. Returns entries with
-        //    `iconData = nil` — we enrich them below.
+        // 1. Scan installed apps off main and publish the un-enriched
+        //    cache IMMEDIATELY. The first search after launch returns
+        //    app results in ~scan-time + ~0 instead of waiting on ~300
+        //    icon encodes (1-3s cold). Rows with `iconData = nil`
+        //    fall back to FileIconView in the view layer — same path
+        //    that was used before app-icon caching landed, so this is
+        //    a zero-regression first-paint.
         let scanned = await Task.detached(priority: .userInitiated) {
             Self.scanInstalledApps()
         }.value
-
-        // 2. Pull whatever icons are already cached on disk. One bulk
-        //    fetch by path; bundle_mtime decides freshness in step 3.
-        let paths = scanned.map(\.path)
-        let cached = await iconStore.bulkFetch(paths: paths)
-
-        // 3. Build the enriched cache: cached PNG when bundle_mtime
-        //    matches, otherwise re-encode now (still off main). Newly-
-        //    encoded icons are persisted in a side task so the loop
-        //    isn't gated on sqlite writes.
-        let iconStore = self.iconStore
-        cache = await Task.detached(priority: .userInitiated) { () -> [AppEntry] in
-            var out: [AppEntry] = []
-            out.reserveCapacity(scanned.count)
-            for entry in scanned {
-                let mtime = bundleMtimeSeconds(path: entry.path)
-                let iconData: Data?
-                if let hit = cached[entry.path], abs(hit.bundleMtime - mtime) < 1.0 {
-                    iconData = hit.png
-                } else {
-                    let png = encodeAppIconPNG(path: entry.path)
-                    iconData = png
-                    if let png {
-                        Task { await iconStore.upsert(
-                            path: entry.path, bundleMtime: mtime, png: png
-                        ) }
-                    }
-                }
-                out.append(AppEntry(
-                    name: entry.name,
-                    path: entry.path,
-                    nameLower: entry.nameLower,
-                    acronym: entry.acronym,
-                    iconData: iconData
-                ))
-            }
-            return out
-        }.value
+        cache = scanned
         cacheTime = Date()
 
-        // 4. Drop disk rows for apps that were uninstalled since the
-        //    last scan. Fire-and-forget; non-blocking.
-        let keep = Set(cache.map(\.path))
-        Task { await iconStore.prune(keepPaths: keep) }
-
-        // IconCache still does the in-memory NSImage warm for any path
-        // that uses FileIconView (non-app file rows). App rows now
-        // bypass it via `iconData`, but other sources still benefit.
+        // 2. Enrich the cache with PNG iconData in the background. On
+        //    a warm launch (disk cache hits) this completes in tens
+        //    of ms; on a cold launch it takes 1-3s. Either way the
+        //    user can already search apps from step 1.
         IconCache.shared.warm(paths: cache.map(\.path))
+        startIconEnrichment(for: scanned)
+    }
+
+    /// Spawns a background task that hydrates `cache` entries with
+    /// their PNG `iconData`. Disk-cached entries (matching mtime) come
+    /// straight from `AppIconStore`; misses are re-encoded off main
+    /// and persisted in a side task so the enrichment loop isn't gated
+    /// on sqlite writes. The enriched cache is published in a single
+    /// actor-isolated swap via `replaceCache` once the pass completes.
+    private func startIconEnrichment(for scanned: [AppEntry]) {
+        let iconStore = self.iconStore
+        Task { [weak self] in
+            let cached = await iconStore.bulkFetch(paths: scanned.map(\.path))
+            let enriched = await Task.detached(priority: .utility) { () -> [AppEntry] in
+                var out: [AppEntry] = []
+                out.reserveCapacity(scanned.count)
+                for entry in scanned {
+                    let mtime = bundleMtimeSeconds(path: entry.path)
+                    let iconData: Data?
+                    if let mtime,
+                       let hit = cached[entry.path],
+                       abs(hit.bundleMtime - mtime) < 1.0 {
+                        iconData = hit.png
+                    } else {
+                        let png = encodeAppIconPNG(path: entry.path)
+                        iconData = png
+                        // Only persist when we have a usable freshness
+                        // key. A nil mtime means stat failed; caching
+                        // the row would risk a self-matching `mtime=0`
+                        // entry that never re-encodes.
+                        if let png, let mtime {
+                            Task { await iconStore.upsert(
+                                path: entry.path, bundleMtime: mtime, png: png
+                            ) }
+                        }
+                    }
+                    out.append(AppEntry(
+                        name: entry.name,
+                        path: entry.path,
+                        nameLower: entry.nameLower,
+                        acronym: entry.acronym,
+                        iconData: iconData
+                    ))
+                }
+                return out
+            }.value
+            await self?.replaceCache(enriched)
+            await iconStore.prune(keepPaths: Set(scanned.map(\.path)))
+        }
+    }
+
+    /// Actor-isolated cache swap. Called by the enrichment task once
+    /// every entry has its `iconData` populated. Skipped if a fresher
+    /// refresh has already run (newer `cacheTime` since the swap was
+    /// dispatched) — otherwise we'd clobber the latest scan with a
+    /// stale enrichment from a prior run.
+    private func replaceCache(_ enriched: [AppEntry]) {
+        // Match by path-set: if the path set differs, a newer refresh
+        // ran and the stale enrichment doesn't apply.
+        guard Set(enriched.map(\.path)) == Set(cache.map(\.path)) else { return }
+        cache = enriched
     }
 
     // MARK: - Helpers
