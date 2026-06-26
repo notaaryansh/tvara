@@ -7,6 +7,7 @@ enum EventType {
     static let messageAdded = "message_added"
     static let fileAdded = "file_added"
     static let imageAdded = "image_added"
+    static let ocrVocabBackfill = "ocr_vocab_backfill"
 }
 
 /// Canonical strings stored in `events.source`.
@@ -32,6 +33,13 @@ struct FileAddedPayload: Codable {
 
 struct ImageAddedPayload: Codable {
     let path: String
+}
+
+/// One image's contribution to the spellfix1 OCR vocab. Carries just the
+/// `images.id` — the worker re-reads the OCR text inside the actor so we
+/// never hold thousands of full OCR strings in memory at once.
+struct OCRVocabBackfillPayload: Codable {
+    let imageID: Int64
 }
 
 // MARK: - Codable convenience

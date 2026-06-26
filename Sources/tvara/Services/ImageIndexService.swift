@@ -185,15 +185,28 @@ actor ImageIndexService {
     /// are reused verbatim. Tracked via the `meta` table so this only
     /// runs once per upgrade.
     private func migrateIfNeeded() async {
+        guard db != nil else { return }
+        // The OCR-vocab backfill is now queue-driven — see
+        // `enqueueOCRVocabBackfillIfNeeded(bus:)`, called from
+        // `EventBusPipeline.start()`. Only the labels+FTS migration runs
+        // synchronously here, since it's bounded by the existing
+        // `rrf_backfill_done` gate and doesn't share the spellfix
+        // shadow-table memory pressure that broke the in-process loop.
+        if metaValue("rrf_backfill_done") != "1" {
+            await backfillLabelsAndFTSIfNeeded()
+        }
+    }
+
+    /// Original (pre-spellfix) one-time backfill: rebuild FTS5 + re-tag
+    /// label rows from cached `labels_json` for installs that predate
+    /// those tables. Idempotent — gated by `rrf_backfill_done`.
+    private func backfillLabelsAndFTSIfNeeded() async {
         guard let db else { return }
-        if metaValue("rrf_backfill_done") == "1" { return }
         guard await ensureModels() else { return }
 
         NSLog("ImageIndexService: one-time backfill of labels + FTS5 for existing rows")
-        // FTS5 rebuild
         sqlite3_exec(db, "INSERT INTO images_fts(images_fts) VALUES('rebuild')", nil, nil, nil)
 
-        // Walk existing rows and re-tag from labels_json
         var stmt: OpaquePointer?
         let sql = "SELECT id, labels_json FROM images WHERE labels_json IS NOT NULL"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -222,53 +235,66 @@ actor ImageIndexService {
         setMetaValue("rrf_backfill_done", "1")
         loadLabelCache()
         NSLog("ImageIndexService: backfill complete")
-
-        // Separate one-shot: seed the spellfix1 vocab from every existing
-        // image's OCR text. Lives behind its own meta flag so adding the
-        // vocab table to a long-running install doesn't pay the cost on
-        // every launch — only the first.
-        await backfillOCRVocabIfNeeded()
     }
 
-    /// One-time pass that walks every image's `ocr` text and feeds its
-    /// distinct tokens into `ocr_vocab`. Subsequent indexes feed the vocab
-    /// inline (see `writeOCRVocab` in `upsert`).
-    private func backfillOCRVocabIfNeeded() async {
+    /// One-time vocab-seeding pass, expressed as a queue producer instead
+    /// of a synchronous loop. For every image that has OCR text, enqueue
+    /// one `ocr_vocab_backfill` event keyed on the image ID; the worker
+    /// (see `OCRVocabBackfillWorker`) drains those in small batches so
+    /// spellfix1's in-memory shadow-table journal never balloons.
+    ///
+    /// Idempotency: the meta flag is flipped after enqueueing finishes,
+    /// so on a crash mid-enqueue the next launch re-runs and the unique
+    /// `dedupe_key` collapses already-queued rows. Workers themselves are
+    /// flag-agnostic — they just consume whatever's pending.
+    func enqueueOCRVocabBackfillIfNeeded(bus: EventBus) async {
         guard let db else { return }
         if metaValue("spellfix_vocab_backfill_done") == "1" { return }
 
-        var ocrTexts: [String] = []
+        var ids: [Int64] = []
         var stmt: OpaquePointer?
-        let sql = "SELECT ocr FROM images WHERE ocr IS NOT NULL AND length(ocr) > 0"
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, "SELECT id FROM images WHERE ocr IS NOT NULL AND length(ocr) > 0", -1, &stmt, nil) == SQLITE_OK {
             while sqlite3_step(stmt) == SQLITE_ROW {
-                if let p = sqlite3_column_text(stmt, 0) {
-                    ocrTexts.append(String(cString: p))
-                }
+                ids.append(sqlite3_column_int64(stmt, 0))
             }
         }
         sqlite3_finalize(stmt)
-        guard !ocrTexts.isEmpty else {
+        guard !ids.isEmpty else {
             setMetaValue("spellfix_vocab_backfill_done", "1")
             return
         }
 
-        NSLog("ImageIndexService: seeding ocr_vocab from %d existing rows", ocrTexts.count)
-        // Single big transaction — spellfix1 INSERTs are cheap but the
-        // per-row commit overhead at this volume isn't.
-        sqlite3_exec(db, "BEGIN", nil, nil, nil)
-        var done = 0
-        for text in ocrTexts {
-            writeOCRVocab(text)
-            done += 1
-            if done % 500 == 0 {
-                NSLog("ImageIndexService: ocr_vocab backfill %d/%d", done, ocrTexts.count)
-                await Task.yield()
+        NSLog("ImageIndexService: enqueueing ocr_vocab backfill for %d images", ids.count)
+        var enqueued = 0
+        for id in ids {
+            do {
+                _ = try await bus.enqueue(
+                    type: EventType.ocrVocabBackfill,
+                    source: EventSource.fs,
+                    payload: OCRVocabBackfillPayload(imageID: id),
+                    dedupeKey: "vocab_backfill:\(id)"
+                )
+                enqueued += 1
+            } catch {
+                NSLog("ImageIndexService: ocr_vocab enqueue failed for id=%lld: %@", id, "\(error)")
             }
         }
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
         setMetaValue("spellfix_vocab_backfill_done", "1")
-        NSLog("ImageIndexService: ocr_vocab backfill complete")
+        NSLog("ImageIndexService: ocr_vocab backfill enqueued (%d events)", enqueued)
+    }
+
+    /// Worker entry point. Pull this image's OCR text and feed its
+    /// distinct tokens into the spellfix1 vocab. Missing rows complete
+    /// cleanly — they were either deleted between enqueue and drain, or
+    /// updated to drop their OCR text. Neither is a retry-worthy error.
+    func indexOCRVocab(imageID: Int64) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT ocr FROM images WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        sqlite3_bind_int64(stmt, 1, imageID)
+        guard sqlite3_step(stmt) == SQLITE_ROW, let p = sqlite3_column_text(stmt, 0) else { return }
+        writeOCRVocab(String(cString: p))
     }
 
     private func metaValue(_ key: String) -> String? {

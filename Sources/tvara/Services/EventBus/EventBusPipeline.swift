@@ -24,12 +24,17 @@ final class EventBusPipeline: @unchecked Sendable {
     private let imageWorker: ImageIndexWorker
     private let imageRunner: WorkerRunner
 
+    private let ocrVocabWorker: OCRVocabBackfillWorker
+    private let ocrVocabRunner: WorkerRunner
+    private let images: ImageIndexService
+
     init(
         imessage: AppleMessagesService,
         images: ImageIndexService
     ) {
         let bus = EventBus()
         self.bus = bus
+        self.images = images
 
         self.imsgProducer = IMessageProducer(bus: bus, service: imessage)
         self.imsgWorker = MessageIndexWorker(imessage: imessage)
@@ -49,6 +54,9 @@ final class EventBusPipeline: @unchecked Sendable {
         )
         self.imageWorker = ImageIndexWorker(images: images)
         self.imageRunner = WorkerRunner(bus: bus, worker: imageWorker)
+
+        self.ocrVocabWorker = OCRVocabBackfillWorker(images: images)
+        self.ocrVocabRunner = WorkerRunner(bus: bus, worker: ocrVocabWorker)
     }
 
     func start() async {
@@ -58,6 +66,13 @@ final class EventBusPipeline: @unchecked Sendable {
         await fileRunner.start()
         await imageProducer.start()
         await imageRunner.start()
+        await ocrVocabRunner.start()
+        // Seed the spellfix1 vocab backfill into the queue. Cheap when
+        // the meta flag has already been flipped — early-returns inside
+        // the service — so safe to call on every launch.
+        Task.detached(priority: .utility) { [bus, images] in
+            await images.enqueueOCRVocabBackfillIfNeeded(bus: bus)
+        }
 
         let depth = await bus.depthByStatus()
         let pending = depth["pending"] ?? 0
