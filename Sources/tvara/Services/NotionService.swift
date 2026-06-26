@@ -95,6 +95,7 @@ actor NotionService {
             sqlite3_bind_text(stmt, Int32(i + 1), pattern, -1, SQLITE_TRANSIENT_NN)
         }
 
+        let icon = SourceAppIcons.iconData(for: .notion)
         var out: [SearchResult] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id    = colText(stmt, 0)
@@ -128,7 +129,7 @@ actor NotionService {
                 badge: nil,
                 openTarget: .url(url),
                 rank: rank,
-                iconData: nil
+                iconData: icon
             ))
         }
         // Sort by rank (highest first), keep top `limit`.
