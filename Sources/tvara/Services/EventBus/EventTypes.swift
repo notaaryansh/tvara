@@ -7,6 +7,7 @@ enum EventType {
     static let messageAdded = "message_added"
     static let fileAdded = "file_added"
     static let imageAdded = "image_added"
+    static let mailAdded = "mail_added"
     static let ocrVocabBackfill = "ocr_vocab_backfill"
 }
 
@@ -33,6 +34,14 @@ struct FileAddedPayload: Codable {
 
 struct ImageAddedPayload: Codable {
     let path: String
+}
+
+/// One `.emlx` file landing in Mail's storage tree. mtime travels with the
+/// payload so the worker can avoid re-parsing already-indexed files
+/// without touching the filesystem.
+struct MailAddedPayload: Codable {
+    let path: String
+    let mtime: Double
 }
 
 /// One image's contribution to the spellfix1 OCR vocab. Carries just the

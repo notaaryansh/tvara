@@ -28,6 +28,11 @@ final class EventBusPipeline: @unchecked Sendable {
     private let imageWorker: ImageIndexWorker
     private let imageRunner: WorkerRunner
 
+    private let mailProducer: MailProducer
+    private let mailWorker: MailIndexWorker
+    private let mailRunner: WorkerRunner
+    private let mail: AppleMailService
+
     private let ocrVocabWorker: OCRVocabBackfillWorker
     private let ocrVocabRunner: WorkerRunner
     private let images: ImageIndexService
@@ -35,16 +40,22 @@ final class EventBusPipeline: @unchecked Sendable {
     init(
         imessage: AppleMessagesService,
         whatsapp: WhatsAppService,
+        mail: AppleMailService,
         images: ImageIndexService
     ) {
         let bus = EventBus()
         self.bus = bus
         self.images = images
+        self.mail = mail
 
         self.imsgProducer = IMessageProducer(bus: bus, service: imessage)
         self.whatsappProducer = WhatsAppProducer(bus: bus, service: whatsapp)
         self.messageWorker = MessageIndexWorker(imessage: imessage, whatsapp: whatsapp)
         self.messageRunner = WorkerRunner(bus: bus, worker: messageWorker)
+
+        self.mailProducer = MailProducer(bus: bus, mailBase: mail.mailBase)
+        self.mailWorker = MailIndexWorker(mail: mail)
+        self.mailRunner = WorkerRunner(bus: bus, worker: mailWorker)
 
         self.fileIndex = FileIndexService()
         self.fileProducer = FileProducer(
@@ -73,12 +84,21 @@ final class EventBusPipeline: @unchecked Sendable {
         await fileRunner.start()
         await imageProducer.start()
         await imageRunner.start()
+        await mailProducer.start()
+        await mailRunner.start()
         await ocrVocabRunner.start()
         // Seed the spellfix1 vocab backfill into the queue. Cheap when
         // the meta flag has already been flipped — early-returns inside
         // the service — so safe to call on every launch.
         Task.detached(priority: .utility) { [bus, images] in
             await images.enqueueOCRVocabBackfillIfNeeded(bus: bus)
+        }
+        // Mail bootstrap: walk every .emlx into the mirror once per
+        // launch. Detached so it doesn't block the pipeline start;
+        // FSEvents picks up anything that arrives mid-walk and the
+        // dedupe key collapses overlap with bootstrap rows.
+        Task.detached(priority: .utility) { [mail] in
+            await mail.bootstrap()
         }
 
         let depth = await bus.depthByStatus()
