@@ -20,6 +20,7 @@ tvara.app/
 
 # Claude Code local session/permission state
 .claude/
+CLAUDE.md
 
 # Unrelated working files in this directory
 writing-submissions.md
