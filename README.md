@@ -176,6 +176,7 @@ on first launch. The architecture is set; the polish is in flight.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE). Free for personal, hobby,
-research, and non-commercial-organization use. Commercial use reserved.
-Commercial licensing: aaryanshsahay7@gmail.com.
+[GNU Affero General Public License v3.0](LICENSE). Free to use, modify,
+and distribute under the terms of the AGPL. If you run a modified version
+over a network, you must make the corresponding source available to its
+users under the same license.
