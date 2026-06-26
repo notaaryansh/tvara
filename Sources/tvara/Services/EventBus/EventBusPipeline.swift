@@ -33,6 +33,11 @@ final class EventBusPipeline: @unchecked Sendable {
     private let mailRunner: WorkerRunner
     private let mail: AppleMailService
 
+    private let discordProducer: DiscordProducer
+    private let discordWorker: DiscordIndexWorker
+    private let discordRunner: WorkerRunner
+    private let discord: DiscordService
+
     private let ocrVocabWorker: OCRVocabBackfillWorker
     private let ocrVocabRunner: WorkerRunner
     private let images: ImageIndexService
@@ -41,6 +46,7 @@ final class EventBusPipeline: @unchecked Sendable {
         imessage: AppleMessagesService,
         whatsapp: WhatsAppService,
         mail: AppleMailService,
+        discord: DiscordService,
         images: ImageIndexService
     ) {
         let bus = EventBus()
@@ -56,6 +62,11 @@ final class EventBusPipeline: @unchecked Sendable {
         self.mailProducer = MailProducer(bus: bus, mailBase: mail.mailBase)
         self.mailWorker = MailIndexWorker(mail: mail)
         self.mailRunner = WorkerRunner(bus: bus, worker: mailWorker)
+
+        self.discord = discord
+        self.discordProducer = DiscordProducer(bus: bus, cacheDir: discord.cacheDir)
+        self.discordWorker = DiscordIndexWorker(discord: discord)
+        self.discordRunner = WorkerRunner(bus: bus, worker: discordWorker)
 
         self.fileIndex = FileIndexService()
         self.fileProducer = FileProducer(
@@ -86,6 +97,8 @@ final class EventBusPipeline: @unchecked Sendable {
         await imageRunner.start()
         await mailProducer.start()
         await mailRunner.start()
+        await discordProducer.start()
+        await discordRunner.start()
         await ocrVocabRunner.start()
         // Seed the spellfix1 vocab backfill into the queue. Cheap when
         // the meta flag has already been flipped — early-returns inside
@@ -99,6 +112,11 @@ final class EventBusPipeline: @unchecked Sendable {
         // dedupe key collapses overlap with bootstrap rows.
         Task.detached(priority: .utility) { [mail] in
             await mail.bootstrap()
+        }
+        // Discord bootstrap: one-shot full cache walk. Subsequent
+        // changes flow in through the FSEvents producer.
+        Task.detached(priority: .utility) { [discord] in
+            await discord.bootstrap()
         }
 
         let depth = await bus.depthByStatus()

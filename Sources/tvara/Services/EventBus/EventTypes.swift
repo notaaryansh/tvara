@@ -8,6 +8,7 @@ enum EventType {
     static let fileAdded = "file_added"
     static let imageAdded = "image_added"
     static let mailAdded = "mail_added"
+    static let discordScan = "discord_scan"
     static let ocrVocabBackfill = "ocr_vocab_backfill"
 }
 
@@ -42,6 +43,16 @@ struct ImageAddedPayload: Codable {
 struct MailAddedPayload: Codable {
     let path: String
     let mtime: Double
+}
+
+/// Signal — "Discord's Chromium HTTP cache changed, run an incremental
+/// scan." Carries no rowid/path: the service already tracks
+/// `lastBuildTime` internally and walks every cache entry newer than
+/// that. The `bucket` field lets the dedupe-key UNIQUE constraint
+/// collapse a burst of FSEvents within the same time window into one
+/// queued scan.
+struct DiscordScanPayload: Codable {
+    let bucket: Int64
 }
 
 /// One image's contribution to the spellfix1 OCR vocab. Carries just the

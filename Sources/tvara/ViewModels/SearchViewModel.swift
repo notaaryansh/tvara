@@ -276,6 +276,7 @@ final class SearchViewModel: ObservableObject {
             imessage: imessageService,
             whatsapp: whatsappService,
             mail: mailService,
+            discord: discordService,
             images: imageService
         )
         self.folderService = folderService
