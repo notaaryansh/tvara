@@ -1,21 +1,23 @@
 import Foundation
 
 /// Consumes `message_added` events and routes them to the right
-/// source-specific indexer. Currently only iMessage is wired; Discord /
-/// WhatsApp follow the same pattern.
+/// source-specific indexer. iMessage + WhatsApp wired today; Discord
+/// follows the same pattern.
 ///
-/// Batches the chat.db copy across all events in a single claim — the
-/// iMessage decode path benefits enormously from sharing one snapshot
-/// rather than copying chat.db per event.
+/// Batches the source-db copy across all events in a single claim — the
+/// decode paths benefit enormously from sharing one snapshot rather than
+/// copying per event.
 final class MessageIndexWorker: EventWorker, @unchecked Sendable {
     let eventType = EventType.messageAdded
     let batchSize = 100
     let pollInterval: TimeInterval = 3.0
 
     private let imessage: AppleMessagesService
+    private let whatsapp: WhatsAppService
 
-    init(imessage: AppleMessagesService) {
+    init(imessage: AppleMessagesService, whatsapp: WhatsAppService) {
         self.imessage = imessage
+        self.whatsapp = whatsapp
     }
 
     /// Single-event path — only used if `processBatch` isn't overridden
@@ -62,6 +64,18 @@ final class MessageIndexWorker: EventWorker, @unchecked Sendable {
                     // Transient chat.db copy / sqlite failure — let the
                     // bus retry the whole batch rather than silently
                     // dropping the events.
+                    for entry in entries {
+                        out.append(BatchResult(id: entry.id, error: error))
+                    }
+                }
+            case EventSource.whatsapp:
+                let zpks = entries.map(\.rowid)
+                do {
+                    try await whatsapp.indexZPKs(zpks)
+                    for entry in entries {
+                        out.append(BatchResult(id: entry.id, error: nil))
+                    }
+                } catch {
                     for entry in entries {
                         out.append(BatchResult(id: entry.id, error: error))
                     }

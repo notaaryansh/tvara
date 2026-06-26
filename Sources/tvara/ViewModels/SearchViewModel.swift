@@ -274,6 +274,7 @@ final class SearchViewModel: ObservableObject {
         self.settingsService = settingsService
         self.eventBusPipeline = EventBusPipeline(
             imessage: imessageService,
+            whatsapp: whatsappService,
             images: imageService
         )
         self.folderService = folderService

@@ -11,9 +11,13 @@ import Foundation
 final class EventBusPipeline: @unchecked Sendable {
     let bus: EventBus
 
+    /// Single worker drains `message_added` for every messaging source —
+    /// the producer tags `events.source` (imessage / whatsapp / …) and
+    /// the worker dispatches into the matching per-source service.
     private let imsgProducer: IMessageProducer
-    private let imsgWorker: MessageIndexWorker
-    private let imsgRunner: WorkerRunner
+    private let whatsappProducer: WhatsAppProducer
+    private let messageWorker: MessageIndexWorker
+    private let messageRunner: WorkerRunner
 
     private let fileIndex: FileIndexService
     private let fileProducer: FileProducer
@@ -30,6 +34,7 @@ final class EventBusPipeline: @unchecked Sendable {
 
     init(
         imessage: AppleMessagesService,
+        whatsapp: WhatsAppService,
         images: ImageIndexService
     ) {
         let bus = EventBus()
@@ -37,8 +42,9 @@ final class EventBusPipeline: @unchecked Sendable {
         self.images = images
 
         self.imsgProducer = IMessageProducer(bus: bus, service: imessage)
-        self.imsgWorker = MessageIndexWorker(imessage: imessage)
-        self.imsgRunner = WorkerRunner(bus: bus, worker: imsgWorker)
+        self.whatsappProducer = WhatsAppProducer(bus: bus, service: whatsapp)
+        self.messageWorker = MessageIndexWorker(imessage: imessage, whatsapp: whatsapp)
+        self.messageRunner = WorkerRunner(bus: bus, worker: messageWorker)
 
         self.fileIndex = FileIndexService()
         self.fileProducer = FileProducer(
@@ -61,7 +67,8 @@ final class EventBusPipeline: @unchecked Sendable {
 
     func start() async {
         await imsgProducer.start()
-        await imsgRunner.start()
+        await whatsappProducer.start()
+        await messageRunner.start()
         await fileProducer.start()
         await fileRunner.start()
         await imageProducer.start()
