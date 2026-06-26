@@ -203,6 +203,14 @@ final class SearchViewModel: ObservableObject {
     /// set true.
     private var inflightSmartTask: Task<Void, Never>?
 
+    /// Latest in-flight image-search task. Cancelled on every new
+    /// keystroke so the actor inside ImageIndexService can short-circuit
+    /// the old query instead of finishing a doomed 300-500ms cycle while
+    /// the user is already typing the next one. Without this the actor
+    /// (which is serial) queues the new search behind the old, and the
+    /// UI looks frozen until both complete.
+    private var inflightImageTask: Task<Void, Never>?
+
     private static let allTabResultCap = 60
     private static let messagesTabResultCap = 50
 
@@ -377,6 +385,18 @@ final class SearchViewModel: ObservableObject {
     private static var minimumQueryLength: Int { minimumQueryLengthForUI }
 
     private func performSearch(_ query: String) {
+        let __t0 = CFAbsoluteTimeGetCurrent()
+        var __stage = __t0
+        func __mark(_ name: String) {
+            let now = CFAbsoluteTimeGetCurrent()
+            let dt = (now - __stage) * 1000
+            if dt > 1.0 { NSLog("Main.performSearch: %@ %.1fms", name, dt) }
+            __stage = now
+        }
+        defer {
+            let total = (CFAbsoluteTimeGetCurrent() - __t0) * 1000
+            if total > 5.0 { NSLog("Main.performSearch: TOTAL %.1fms", total) }
+        }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         // Treat anything below the minimum length the same as empty —
         // clears everything and shows the empty state. Avoids the
@@ -407,10 +427,10 @@ final class SearchViewModel: ObservableObject {
         // still constructed, properties still exist — but are not queried
         // or merged here. Flip `Self.contentSearchEnabled = true` when
         // we're ready to bring content search back into the UI.
-        windowResults        = windowService.match(query: trimmed)
-        settingsResults      = settingsService.match(query: trimmed)
-        folderResults        = folderService.match(query: trimmed)
-        systemActionResults  = systemActionsService.match(query: trimmed)
+        windowResults        = windowService.match(query: trimmed); __mark("windowService.match")
+        settingsResults      = settingsService.match(query: trimmed); __mark("settingsService.match")
+        folderResults        = folderService.match(query: trimmed); __mark("folderService.match")
+        systemActionResults  = systemActionsService.match(query: trimmed); __mark("systemActionsService.match")
 
         // Clear EVERY @Published source array SYNCHRONOUSLY so the merged
         // view doesn't briefly show stale results from the previous query
@@ -422,12 +442,13 @@ final class SearchViewModel: ObservableObject {
         mailResults = []; notesResults = []; notionResults = []
         linearResults = []; spotifyResults = []; clipboardResults = []
         imageResults = []
+        __mark("clear 12 @Published arrays")
         // Apps NOW runs synchronously against an in-memory index built
         // at launch (warmCache) — same shape as settings/window/folder.
         // This is what makes "spoti" surface Spotify in the same frame
         // as the keystroke instead of after the 80ms debounce + actor
         // hop. Assigned AFTER clearing so a cold cache leaves it [].
-        appResults           = appService.match(query: trimmed)
+        appResults           = appService.match(query: trimmed); __mark("appService.match")
         // Populate the per-section loading set SYNCHRONOUSLY here, before
         // the debounce/smart-detection task even starts. That way the
         // section skeleton (every kind's header with a spinner) renders
@@ -476,6 +497,12 @@ final class SearchViewModel: ObservableObject {
         // Cancel any in-flight smart task from a previous query so it
         // doesn't quietly land late and toggle UI state.
         inflightSmartTask?.cancel()
+        // Same for the image actor: cancel the prior search so the
+        // ImageIndexService can bail out of its in-flight pipeline
+        // (it checks Task.isCancelled between phases). Without this the
+        // actor — serialized — finishes the old query before starting
+        // the new one, and the gap reads as a hang.
+        inflightImageTask?.cancel()
 
         if Self.contentSearchEnabled {
             // ── content search (DISABLED FOR v0) ─────────────────────
@@ -714,8 +741,13 @@ final class SearchViewModel: ObservableObject {
         // Images are blacklisted from the frequency reranker (stableId is
         // nil for every row) and use a different search signature, so they
         // stay outside the generic fan-out.
-        Task.detached { [weak self] in
+        // Hold a reference so the next keystroke can cancel us. The
+        // actor checks Task.isCancelled between phases and returns []
+        // early, so a fast typer doesn't queue searches behind each
+        // other on the serial actor.
+        inflightImageTask = Task.detached { [weak self] in
             let r = await imageService.search(query)
+            if Task.isCancelled { return }
             await self?.assignSection(.images, searchID: searchID, results: r)
         }
 
@@ -756,6 +788,7 @@ final class SearchViewModel: ObservableObject {
         results: [SearchResult]
     ) {
         guard searchID == currentSearchID else { return }
+        let __t0 = CFAbsoluteTimeGetCurrent()
         switch kind {
         case .files:     fileResults = results
         case .whatsapp:  whatsappResults = results
@@ -768,6 +801,8 @@ final class SearchViewModel: ObservableObject {
         case .apps:      break  // apps populate synchronously in search()
         }
         finishSection(kind)
+        let dt = (CFAbsoluteTimeGetCurrent() - __t0) * 1000
+        if dt > 2.0 { NSLog("Main.assignSection(%@, n=%d): %.1fms", "\(kind)", results.count, dt) }
     }
 
     private func assignNotion(searchID: Int, results: [SearchResult], query: String) {
@@ -1089,7 +1124,10 @@ final class SearchViewModel: ObservableObject {
     /// flat selection index space) so ↑/↓ keeps walking a single list.
     var blendedSections: [BlendedSection] {
         if let cached = blendedSectionsCache { return cached }
+        let __t0 = CFAbsoluteTimeGetCurrent()
         let computed = computeBlendedSections()
+        let dt = (CFAbsoluteTimeGetCurrent() - __t0) * 1000
+        if dt > 2.0 { NSLog("Main.blendedSections recompute %.1fms (n=%d)", dt, computed.count) }
         blendedSectionsCache = computed
         return computed
     }

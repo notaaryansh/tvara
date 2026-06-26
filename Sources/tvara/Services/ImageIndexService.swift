@@ -43,6 +43,20 @@ actor ImageIndexService {
     private var lastScan: Date = .distantPast
     private static let scanLifetime: TimeInterval = 600  // 10 min
 
+    // Floor for MobileCLIP-S2 cosine similarity below which a "match"
+    // is indistinguishable from noise. Anything beneath this gets
+    // excluded from the RRF rank lists so unrelated rows don't fill in
+    // the top-N when no signal really matches the query.
+    private static let minCLIPCosine: Float = 0.20
+
+    // Encoded thumbnail bytes keyed by `"<path>|<mtime>"`. Search() hits
+    // this before disk on every result row — generating a fresh JPEG
+    // from a CGImageSource per row was costing 7-8ms × 30 ≈ 230ms inside
+    // search(). LRU-ish: capped, drops oldest entries when full.
+    private var thumbCache: [String: Data] = [:]
+    private var thumbCacheOrder: [String] = []
+    private static let thumbCacheMax = 512
+
     init(scanRoots: [URL]? = nil) {
         let home = NSHomeDirectory()
         let supportDir = home + "/Library/Application Support/tvara"
@@ -195,6 +209,42 @@ actor ImageIndexService {
         if metaValue("rrf_backfill_done") != "1" {
             await backfillLabelsAndFTSIfNeeded()
         }
+        purgeBundleInternalsIfNeeded()
+    }
+
+    /// One-shot DB cleanup for pre-fix installs: removes rows whose path
+    /// lives inside a macOS bundle directory (Photos library, .app, etc.).
+    /// Earlier versions of `enumerate` descended into these — the
+    /// derivatives' UUID filenames cluttered search results. Gated by a
+    /// meta flag so it only runs once per install.
+    private func purgeBundleInternalsIfNeeded() {
+        guard let db else { return }
+        if metaValue("bundle_internals_purged_v1") == "1" { return }
+        let patterns = [
+            "%.photoslibrary/%",
+            "%.aplibrary/%",
+            "%.migratedaperturelibrary/%",
+            "%.migratediphotolibrary/%",
+            "%.app/%",
+            "%.framework/%",
+        ]
+        var totalDeleted = 0
+        for pattern in patterns {
+            var stmt: OpaquePointer?
+            let sql = "DELETE FROM images WHERE path LIKE ?"
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT_IMG)
+                if sqlite3_step(stmt) == SQLITE_DONE {
+                    totalDeleted += Int(sqlite3_changes(db))
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+        // FTS5 contentless mirror cascades via the trigger on `images`,
+        // and image_labels has ON DELETE CASCADE, so no extra cleanup
+        // here. The thumb cache is in-memory and refills naturally.
+        NSLog("ImageIndexService: purged %d bundle-internal rows", totalDeleted)
+        setMetaValue("bundle_internals_purged_v1", "1")
     }
 
     /// Original (pre-spellfix) one-time backfill: rebuild FTS5 + re-tag
@@ -348,6 +398,17 @@ actor ImageIndexService {
             NSLog("ImageSearch: %@ %.1fms", name, (now - stage) * 1000)
             stage = now
         }
+        // Cooperative cancellation. The caller (SearchViewModel) cancels
+        // the outer Task on every new keystroke; we check at each phase
+        // boundary so the actor releases promptly for the next query
+        // instead of finishing 300-500ms of doomed work.
+        func cancelled() -> Bool {
+            if Task.isCancelled {
+                NSLog("ImageSearch: cancelled after %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+                return true
+            }
+            return false
+        }
         guard await ensureModels(),
               let qVec = encodeText(trimmed) else { return [] }
         mark("encodeText")
@@ -377,17 +438,27 @@ actor ImageIndexService {
         sqlite3_finalize(stmt)
         mark("SELECT images (rows=\(rows.count))")
         if rows.isEmpty { return [] }
+        if cancelled() { return [] }
 
         // ─── Signal 1: image-CLIP cosine ───────────────────────────────────
+        // Drop sub-threshold cosines BEFORE handing positions to RRF.
+        // Without this floor, every image gets a rank — so when nothing
+        // really matches, RRF still picks 30 "best of the noise" rows
+        // and the result list looks random.
         var imgScores: [(Int64, Float)] = []
         imgScores.reserveCapacity(rows.count)
         for (id, r) in rows {
             var s: Float = 0
             vDSP_dotpr(qVec, 1, r.imgEmb, 1, &s, vDSP_Length(512))
-            imgScores.append((id, s))
+            if s >= Self.minCLIPCosine {
+                imgScores.append((id, s))
+            }
         }
         imgScores.sort { $0.1 > $1.1 }
-        mark("imgScores dotpr+sort")
+        // Cap to a top-K so RRF positions stay comparable to BM25's 200.
+        if imgScores.count > 200 { imgScores = Array(imgScores.prefix(200)) }
+        mark("imgScores dotpr+sort (kept=\(imgScores.count))")
+        if cancelled() { return [] }
 
         // ─── Signal 2: best-label cosine per image ─────────────────────────
         // First: cosine(query, every label) once.
@@ -415,8 +486,12 @@ actor ImageIndexService {
         }
         sqlite3_finalize(llStmt)
         mark("SELECT image_labels (pairs=\(bestLabelPerImage.count))")
-        let labelRanks = bestLabelPerImage
+        // Same floor + cap as imgScores: a 0.10-cosine "best label" is
+        // not a signal, just whatever happened to be the least-bad tag.
+        let labelRanks: [(Int64, Float)] = bestLabelPerImage
+            .filter { $0.value >= Self.minCLIPCosine }
             .sorted { $0.value > $1.value }
+            .prefix(200)
             .map { ($0.key, $0.value) }
 
         // ─── Signal 3: BM25 over OCR via FTS5 ──────────────────────────────
@@ -448,13 +523,25 @@ actor ImageIndexService {
 
         let fused = rrf.sorted { $0.value > $1.value }.prefix(limit)
         mark("RRF fusion")
+        if cancelled() { return [] }
 
-        let results: [SearchResult] = fused.compactMap { (imageID, fusedScore) -> SearchResult? in
+        // Build the metadata first (synchronous, actor-bound — reads DB
+        // for top labels). Thumbnails are deferred to a parallel pass
+        // below since CGImageSource thumbnailing dominated 230ms+ of
+        // each search() call when done sequentially.
+        struct Intermediate {
+            let imageID: Int64
+            let title: String
+            let subtitle: String
+            let badge: String
+            let rank: Int
+            let path: String
+        }
+        let intermediates: [Intermediate] = fused.compactMap { (imageID, fusedScore) in
             guard let r = rows[imageID] else { return nil }
             let imgC = imgCosine[imageID] ?? 0
             let labC = bestLabelPerImage[imageID] ?? 0
 
-            // Subtitle: OCR snippet wins if non-empty, then top labels.
             let snippet = r.ocr.trimmingCharacters(in: .whitespacesAndNewlines)
                               .replacingOccurrences(of: "\n", with: " ")
             let topLabels = topLabelNames(forImage: imageID).joined(separator: ", ")
@@ -463,28 +550,36 @@ actor ImageIndexService {
             else if !topLabels.isEmpty { subtitle = topLabels }
             else { subtitle = "\(r.w)×\(r.h)" }
 
-            // Rank encodes the fused score into a sortable Int so the
-            // cross-source merge in SearchViewModel keeps strong fused
-            // matches near the top of the unified results.
-            let rank = Int(fusedScore * 100_000)
-
-            // Badge shows whichever signal won this image so the user has
-            // a quick intuition for "why did this match".
-            let badge = String(format: "%.2f", max(imgC, labC))
-
-            let iconData = makeThumbnail(path: r.path, maxDim: 256)
-            return SearchResult(
+            return Intermediate(
+                imageID: imageID,
                 title: (r.path as NSString).lastPathComponent,
                 subtitle: subtitle,
-                source: .images,
-                date: nil,
-                badge: badge,
-                openTarget: .file(r.path),
-                rank: rank,
-                iconData: iconData
+                badge: String(format: "%.2f", max(imgC, labC)),
+                rank: Int(fusedScore * 100_000),
+                path: r.path
             )
         }
-        mark("results+thumbnails (n=\(results.count))")
+        mark("intermediates (n=\(intermediates.count))")
+        if cancelled() { return [] }
+
+        // Pull thumbnails in parallel. Cache hits skip the work entirely;
+        // misses fan out to detached tasks on the global pool, then we
+        // write the bytes back into the actor cache at the end.
+        let thumbs = await fetchThumbnails(paths: intermediates.map(\.path), maxDim: 256)
+        mark("thumbnails (n=\(thumbs.count))")
+
+        let results: [SearchResult] = intermediates.map { mid in
+            SearchResult(
+                title: mid.title,
+                subtitle: mid.subtitle,
+                source: .images,
+                date: nil,
+                badge: mid.badge,
+                openTarget: .file(mid.path),
+                rank: mid.rank,
+                iconData: thumbs[mid.path] ?? nil
+            )
+        }
 
         // ─── Signal 4: fuzzy OCR via spellfix1 ────────────────────────────
         // Catches both user typos ("tomijazz" → "tomljazz") AND OCR errors
@@ -576,7 +671,7 @@ actor ImageIndexService {
             if !snippet.isEmpty { subtitle = String(snippet.prefix(120)) }
             else if !topLabels.isEmpty { subtitle = topLabels }
             else { subtitle = "\(r.w)×\(r.h)" }
-            let iconData = makeThumbnail(path: r.path, maxDim: 256)
+            let iconData = thumbnailFromCacheOrLoad(path: r.path, maxDim: 256)
             out.append(SearchResult(
                 title: (r.path as NSString).lastPathComponent,
                 subtitle: subtitle,
@@ -711,11 +806,22 @@ actor ImageIndexService {
     private func enumerate(roots: [URL]) -> [URL] {
         var out: [URL] = []
         let fm = FileManager.default
+        // Prefetch isPackage so the enumerator returns it without a
+        // separate stat per URL. Bundles (.photoslibrary, .app,
+        // .framework, …) get descended into by default — we explicitly
+        // skip them: their internal storage is UUID-named derivatives,
+        // not user-meaningful images.
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isPackageKey]
         for root in roots {
             guard let enumr = fm.enumerator(at: root,
-                                            includingPropertiesForKeys: [.isRegularFileKey],
+                                            includingPropertiesForKeys: keys,
                                             options: [.skipsHiddenFiles]) else { continue }
             for case let f as URL in enumr {
+                let vals = try? f.resourceValues(forKeys: Set(keys))
+                if vals?.isPackage == true {
+                    enumr.skipDescendants()
+                    continue
+                }
                 if allowedExts.contains(f.pathExtension.lowercased()) {
                     out.append(f)
                 }
@@ -812,6 +918,11 @@ actor ImageIndexService {
         // makes the fuzzy-OCR search path work for new images without
         // a re-backfill.
         writeOCRVocab(ocr)
+        // Re-indexed file's pixels may have changed — drop any cached
+        // thumbnail so the next search re-renders fresh bytes.
+        if thumbCache.removeValue(forKey: path) != nil {
+            thumbCacheOrder.removeAll(where: { $0 == path })
+        }
     }
 
     /// Tokenise OCR text and insert into the spellfix1 vocabulary table.
@@ -1069,7 +1180,66 @@ actor ImageIndexService {
         return buf
     }
 
-    private func makeThumbnail(path: String, maxDim: Int) -> Data? {
+    /// Cache-aware single-path thumbnail (used by the fuzzy path where
+    /// we only need 3 — not worth a TaskGroup). Reads/writes the actor
+    /// cache so the next call for the same path is free.
+    private func thumbnailFromCacheOrLoad(path: String, maxDim: Int) -> Data? {
+        if let cached = thumbCache[path] { return cached }
+        guard let data = Self.makeThumbnail(path: path, maxDim: maxDim) else { return nil }
+        cacheStoreThumb(path: path, data: data)
+        return data
+    }
+
+    /// Parallel thumbnail fetch. Splits `paths` into cache hits (returned
+    /// synchronously) and misses (fanned out across a TaskGroup so all
+    /// 30-ish JPEG encodes happen on the global pool concurrently rather
+    /// than serially on the actor). Returns `[path: Data?]`.
+    private func fetchThumbnails(paths: [String], maxDim: Int) async -> [String: Data?] {
+        var out: [String: Data?] = [:]
+        var misses: [String] = []
+        for p in paths {
+            if let cached = thumbCache[p] {
+                out[p] = cached
+            } else {
+                misses.append(p)
+            }
+        }
+        guard !misses.isEmpty else { return out }
+
+        let loaded: [(String, Data?)] = await withTaskGroup(of: (String, Data?).self) { group in
+            for p in misses {
+                group.addTask {
+                    (p, Self.makeThumbnail(path: p, maxDim: maxDim))
+                }
+            }
+            var collected: [(String, Data?)] = []
+            for await pair in group { collected.append(pair) }
+            return collected
+        }
+        for (p, data) in loaded {
+            out[p] = data
+            if let data { cacheStoreThumb(path: p, data: data) }
+        }
+        return out
+    }
+
+    /// Insert into the thumbnail cache with simple FIFO eviction once
+    /// the cap is hit. Not strictly LRU — paths re-touched by a repeat
+    /// search don't bubble up — but the cap is large enough (512) that
+    /// the difference doesn't matter for our scan sizes.
+    private func cacheStoreThumb(path: String, data: Data) {
+        if thumbCache[path] != nil { return }
+        thumbCache[path] = data
+        thumbCacheOrder.append(path)
+        while thumbCacheOrder.count > Self.thumbCacheMax {
+            let evict = thumbCacheOrder.removeFirst()
+            thumbCache.removeValue(forKey: evict)
+        }
+    }
+
+    /// Nonisolated so it can be invoked from a Task without re-entering
+    /// the actor — search() fans out 30 of these in parallel.
+    nonisolated private static func makeThumbnail(path: String, maxDim: Int) -> Data? {
         let url = URL(fileURLWithPath: path)
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let opts: NSDictionary = [
