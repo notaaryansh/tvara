@@ -329,6 +329,10 @@ final class SearchViewModel: ObservableObject {
         Task { [fileService] in await fileService.warmCache() }
         Task { [notesService] in await notesService.warmCache() }
         Task { [notionService] in await notionService.warmCache() }
+        // Forces the lazy static-let icns→TIFF→PNG transcode off the
+        // main thread before the first keystroke can trip it. Measured
+        // 483 ms on a cold "blu" → Bluetooth match without this.
+        Task { [settingsService] in await settingsService.warmCache() }
         // MobileCLIP-S2 image index — warms the CoreML models and triggers
         // an incremental sweep of ~/Pictures, ~/Desktop, ~/Downloads.
         Task.detached { [imageService] in await imageService.warmCache() }
