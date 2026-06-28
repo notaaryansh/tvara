@@ -376,19 +376,25 @@ final class WindowManagerService {
         return status == .success
     }
 
-    /// Set position + size in two separate AX calls. Some apps refuse to
-    /// resize past their internal min/max — we don't fight that, the call
-    /// just no-ops on those dimensions.
+    /// Set position + size via AX. Either order alone has a failure mode:
+    /// position-first lets macOS clamp the move when the old size would
+    /// push the window off-screen; size-first lets the app's min-width
+    /// (or macOS's tile-group state) ignore the resize, after which
+    /// position then clamps against the still-too-large width. The
+    /// observed symptom was "right-half tiles only on the second
+    /// invocation" because the first pass left the window wide and
+    /// mispositioned; the second pass found it already shrunk and
+    /// converged. Applying size → position → size → position nudges
+    /// past both clamps in one shot. Each AX call is microseconds, so
+    /// the doubled work is invisible.
     private func setFrame(window: AXUIElement, rect: CGRect) -> Bool {
         var pos = rect.origin
         var size = rect.size
         guard let posVal = AXValueCreate(.cgPoint, &pos),
               let sizeVal = AXValueCreate(.cgSize, &size)
         else { return false }
-        // Set size BEFORE position — if we set position first and the new
-        // position would push the (still-old) size off the screen edge,
-        // some apps clamp the position back, leaving the window in the
-        // wrong spot.
+        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeVal)
+        AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, posVal)
         AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeVal)
         AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, posVal)
         return true
