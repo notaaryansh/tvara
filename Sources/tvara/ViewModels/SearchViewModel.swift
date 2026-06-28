@@ -285,6 +285,12 @@ final class SearchViewModel: ObservableObject {
         self.embeddingStore = embeddingStore
         self.historyStore = historyStore
 
+        // Drop the ~300 MB CLIP/MPSGraph state after 5 min idle (or on
+        // system memory pressure). Live FSEvents indexing and backfill
+        // sweeps both go through ensureModels(), so they just re-trigger
+        // a 50-100ms reload and run normally.
+        imageService.startMemoryPressureMonitoring()
+
         // v0 fires performSearch on EVERY keystroke — no debounce. The
         // command sources are sync alias-table loops (~5 µs each), so
         // debouncing was pure perceived latency with zero throughput

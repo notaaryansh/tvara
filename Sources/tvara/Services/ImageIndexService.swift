@@ -34,10 +34,20 @@ actor ImageIndexService {
     private let allowedExts: Set<String> = ["jpg","jpeg","png","heic","heif","tiff","tif","bmp","webp","gif"]
 
     /// Lazily-loaded CoreML encoders. Loading takes ~50-100ms, so we only
-    /// pay that cost the first time a search or index sweep runs.
+    /// pay that cost the first time a search or index sweep runs. Released
+    /// after `idleTimeout` of inactivity (or on memory pressure) so the
+    /// ~300 MB CoreML/MPSGraph state doesn't sit resident forever.
     private var clipImage: MLModel?
     private var clipText: MLModel?
     private var tokenizer: CLIPTokenizer?
+
+    /// Pending fire of `unloadModels()`. Reset on every `ensureModels()`
+    /// call (interactive search OR EventBus image worker), so live indexing
+    /// and backfill keep the model warm naturally.
+    private var idleUnloadTask: Task<Void, Never>?
+    private static let idleTimeout: TimeInterval = 300  // 5 min
+
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     // Debounce so we don't rescan on every search.
     private var lastScan: Date = .distantPast
@@ -748,8 +758,14 @@ actor ImageIndexService {
     // MARK: - Model loading
 
     /// True if both CoreML models loaded successfully. Cached after first call.
+    /// Every call resets the idle-unload timer so any active workload
+    /// (search burst, EventBus indexing batch, backfill sweep) keeps the
+    /// model warm until `idleTimeout` after the last use.
     private func ensureModels() async -> Bool {
-        if clipImage != nil && clipText != nil && tokenizer != nil { return true }
+        if clipImage != nil && clipText != nil && tokenizer != nil {
+            scheduleIdleUnload()
+            return true
+        }
         guard let imgURL = Bundle.module.url(forResource: "mobileclip_s2_image", withExtension: "mlmodelc", subdirectory: "Models"),
               let txtURL = Bundle.module.url(forResource: "mobileclip_s2_text",  withExtension: "mlmodelc", subdirectory: "Models")
         else {
@@ -767,11 +783,59 @@ actor ImageIndexService {
             self.clipImage = try MLModel(contentsOf: imgURL, configuration: cfg)
             self.clipText  = try MLModel(contentsOf: txtURL, configuration: cfg)
             self.tokenizer = CLIPTokenizer()
+            scheduleIdleUnload()
             return true
         } catch {
             NSLog("ImageIndexService: failed to load CoreML models: \(error)")
             return false
         }
+    }
+
+    /// (Re)arm the deferred unload. Each call cancels the previous pending
+    /// fire, so a steady stream of usage keeps the timer perpetually pushed
+    /// out into the future.
+    private func scheduleIdleUnload() {
+        idleUnloadTask?.cancel()
+        idleUnloadTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.idleTimeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.unloadModels(reason: "idle")
+        }
+    }
+
+    /// Release the CoreML models + tokenizer. The next call into
+    /// `ensureModels()` (interactive search, FSEvents-driven indexing,
+    /// backfill) reloads them — typically 50-100ms. Safe to call repeatedly.
+    private func unloadModels(reason: String) {
+        guard clipImage != nil || clipText != nil || tokenizer != nil else { return }
+        clipImage = nil
+        clipText  = nil
+        tokenizer = nil
+        idleUnloadTask?.cancel()
+        idleUnloadTask = nil
+        NSLog("ImageIndexService: unloaded CLIP models (\(reason))")
+    }
+
+    /// Subscribe to system memory-pressure notifications. On `.warning` or
+    /// `.critical` we drop the CLIP models immediately rather than waiting
+    /// for the idle timer — the kernel is already asking everyone to give
+    /// back what they can.
+    nonisolated func startMemoryPressureMonitoring() {
+        Task { await self.installMemoryPressureSource() }
+    }
+
+    private func installMemoryPressureSource() {
+        guard memoryPressureSource == nil else { return }
+        let src = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: .global(qos: .utility)
+        )
+        src.setEventHandler { [weak self] in
+            guard let self else { return }
+            Task { await self.unloadModels(reason: "memory pressure") }
+        }
+        src.resume()
+        memoryPressureSource = src
     }
 
     // MARK: - Indexing
