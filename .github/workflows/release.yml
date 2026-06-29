@@ -1,0 +1,147 @@
+name: Release
+
+# Trigger: every push to main. The job reads CFBundleShortVersionString
+# from Info.plist and only publishes if a GitHub Release with that tag
+# (`v<version>`) doesn't already exist. So to ship, bump the version
+# in Info.plist and merge. Subsequent merges without a version bump
+# short-circuit at the version-check step — no wasted build time.
+on:
+  push:
+    branches: [main]
+  # Manual button on the Actions tab — handy for re-running a failed
+  # release without an extra commit.
+  workflow_dispatch:
+
+permissions:
+  contents: write  # gh release create
+
+jobs:
+  release:
+    # macos-14 ships Xcode 15.x and Apple Silicon runners — required for
+    # `--arch arm64` builds and for notarytool.
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      # ---- Version gate: skip the entire build if v<version> already
+      #      has a release. Cheap (one gh api call), avoids burning 20+
+      #      minutes per merge once a version has shipped.
+      - name: Read version from Info.plist
+        id: version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Info.plist)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tvara version is $VERSION"
+
+      - name: Skip if release already exists
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" \
+              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release ${{ steps.version.outputs.tag }} already exists."
+            echo "Bump CFBundleShortVersionString in Info.plist to ship again."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ---- Toolchain prep ----
+      - name: Select Xcode
+        if: steps.gate.outputs.skip != 'true'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install create-dmg
+        if: steps.gate.outputs.skip != 'true'
+        run: brew install create-dmg
+
+      # CoreML models are .gitignored (weight.bin > 100 MB); pull them
+      # straight from the apple/coreml-mobileclip HuggingFace repo.
+      - name: Fetch CLIP models
+        if: steps.gate.outputs.skip != 'true'
+        run: scripts/fetch-clip-models.sh
+
+      # ---- Import the Developer ID Application cert into an ephemeral
+      #      keychain that lives only for this job, then export the
+      #      cert's SHA-1 hash as $SIGNING_IDENTITY so build-release.sh
+      #      can use it. The keychain password is generated per-run; it
+      #      never leaves the runner.
+      - name: Set up signing keychain
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          echo "$CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" \
+              -P "$CERTIFICATE_PASSWORD" \
+              -A -t cert -f pkcs12 \
+              -k "$KEYCHAIN_PATH"
+          rm "$CERT_PATH"
+
+          # Make the new keychain searchable and authorize codesign to
+          # use the imported private key without an interactive prompt.
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | xargs)
+          security set-key-partition-list \
+              -S apple-tool:,apple:,codesign: \
+              -s -k "$KEYCHAIN_PASSWORD" \
+              "$KEYCHAIN_PATH"
+
+          # Pin the cert SHA so codesign always picks the right identity
+          # even if multiple Developer ID certs exist on the runner.
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+              | grep "Developer ID Application" \
+              | head -1 \
+              | awk '{print $2}')
+          if [[ -z "$IDENTITY" ]]; then
+              echo "::error::No Developer ID Application identity in keychain"
+              security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+              exit 1
+          fi
+          echo "Resolved signing identity: $IDENTITY"
+          echo "SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      # ---- Build, sign, notarize, DMG. Single script invocation;
+      #      everything happens inside build-release.sh.
+      - name: Build + sign + notarize + DMG
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          # SIGNING_IDENTITY arrives via $GITHUB_ENV from the prior step.
+        run: scripts/build-release.sh
+
+      # ---- Publish to GitHub Releases. Tag = v<version>. The DMG
+      #      attaches to the release; users download it from there.
+      - name: Publish GitHub Release
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DMG="tvara-${{ steps.version.outputs.version }}.dmg"
+          if [[ ! -f "$DMG" ]]; then
+              echo "::error::Expected $DMG, not found"
+              ls -la
+              exit 1
+          fi
+          gh release create "${{ steps.version.outputs.tag }}" \
+              "$DMG" \
+              --title "${{ steps.version.outputs.tag }}" \
+              --notes "Release ${{ steps.version.outputs.tag }} (built from ${{ github.sha }})." \
+              --target "${{ github.sha }}"

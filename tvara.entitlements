@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        tvara ships as a hardened-runtime, notarized, Developer-ID-signed
+        macOS app distributed via DMG (NOT through the Mac App Store).
+        The hardened runtime denies several operations by default; each
+        key below explicitly re-enables one that tvara depends on. We
+        intentionally do NOT enable the App Sandbox — launchers need
+        broad filesystem access (Pictures, Downloads, ~/Library/Messages,
+        ~/Library/Mail, etc.) that sandboxing forbids. Outside the
+        sandbox, filesystem access is governed by the NSFooUsageDescription
+        strings in Info.plist plus TCC prompts at first access.
+
+        Note: macOS permissions for Accessibility (window tiling AX calls)
+        and Full Disk Access are TCC grants, not entitlements — the user
+        toggles them in System Settings > Privacy & Security. Nothing
+        needs to live here for those.
+    -->
+
+    <!-- Send AppleEvents to other apps. Required by IMessageSender to
+         drive Messages.app via AppleScript. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+
+    <!-- EventKit calendar access. CalendarEventSaver writes new events. -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
+
+    <!-- Contacts (Address Book) access. ContactsResolver reads it to map
+         phone numbers / emails into chat shortcuts. -->
+    <key>com.apple.security.personal-information.addressbook</key>
+    <true/>
+
+    <!-- Allow loading SPM-generated resource bundles whose code signature
+         was added by a separate `codesign` invocation, not by the same
+         linker pass that signed the parent app. Without this, hardened
+         runtime rejects the nested *.bundle dylibs at first dlopen and
+         CoreML model loading fails. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>
