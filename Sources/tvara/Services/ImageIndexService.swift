@@ -617,7 +617,38 @@ actor ImageIndexService {
         mark("fuzzy OCR (n=\(fuzzyResults.count))")
 
         NSLog("ImageSearch: TOTAL %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        return results + fuzzyResults
+
+        // Filter out any row whose thumbnail generation failed — we don't
+        // want empty tiles in the photo strip, and there's no useful UI to
+        // show for an image we couldn't decode. `makeThumbnail` returns
+        // nil in four situations (file moved/deleted, HEIC with a bad
+        // color profile, screenshot PNGs with quirky metadata sections,
+        // TCC permission revoked). Silently dropping them here is the
+        // cheapest fix that removes the visible broken squares.
+        //
+        // TODO: proper retry + DLQ pipeline instead of silent drop.
+        // The right architecture is:
+        //   1. Enqueue failed paths onto the EventBus as an
+        //      `imageReindex(path:)` event.
+        //   2. ImageIndexWorker picks them up, re-runs the full
+        //      Vision + CLIP + thumbnail pipeline once more. Transient
+        //      failures (locked file mid-copy, momentary permission
+        //      flicker, ImageIO having a bad millisecond) self-heal.
+        //   3. If the re-index also fails: DELETE FROM images WHERE
+        //      path=? AND INSERT INTO image_quarantine(path, mtime,
+        //      quarantined_at). The quarantine table prevents the
+        //      backfill sweep from re-indexing the same broken file on
+        //      the next scan pass (which would thrash forever).
+        //   4. Backfill sweep JOINs against image_quarantine and skips
+        //      paths whose stored mtime matches the current mtime; a
+        //      user edit / replacement bumps the mtime and reopens the
+        //      file for another try.
+        // Estimated ~50 lines. Not doing it now because the silent-drop
+        // above is good enough for v0 UX and the DLQ work belongs in the
+        // same commit that touches the EventBus event schema.
+        let filtered = results.filter { $0.iconData != nil }
+        let filteredFuzzy = fuzzyResults.filter { $0.iconData != nil }
+        return filtered + filteredFuzzy
     }
 
     /// Run the fuzzy OCR pass. Expands every query token via spellfix1 to
