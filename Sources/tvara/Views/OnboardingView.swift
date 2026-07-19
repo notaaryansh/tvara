@@ -82,9 +82,7 @@ struct OnboardingView: View {
                     .foregroundColor(.white.opacity(0.75))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(
-                        Capsule().strokeBorder(Color.white.opacity(0.28), lineWidth: 1)
-                    )
+                    .glassCapsule(fallbackStroke: 0.28)
                 }
                 .buttonStyle(.plain)
                 .padding(14)
@@ -269,9 +267,7 @@ struct OnboardingView: View {
                 .foregroundColor(.white.opacity(0.80))
                 .padding(.horizontal, 11)
                 .padding(.vertical, 6)
-                .background(
-                    Capsule().strokeBorder(Color.white.opacity(0.28), lineWidth: 1)
-                )
+                .glassCapsule(fallbackStroke: 0.28)
             }
             .buttonStyle(.plain)
             .transition(.opacity.combined(with: .scale(scale: 0.90)))
@@ -282,9 +278,7 @@ struct OnboardingView: View {
                     .foregroundColor(.white.opacity(0.65))
                     .padding(.horizontal, 11)
                     .padding(.vertical, 6)
-                    .background(
-                        Capsule().strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
-                    )
+                    .glassCapsule(fallbackStroke: 0.20)
             }
             .buttonStyle(.plain)
             .transition(.opacity.combined(with: .scale(scale: 0.90)))
@@ -297,14 +291,7 @@ struct OnboardingView: View {
             .foregroundColor(.white.opacity(0.95))
             .frame(minWidth: 54, minHeight: 54)
             .padding(.horizontal, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.28), lineWidth: 1)
-            )
+            .glassSurface(cornerRadius: 12, fallbackFill: 0.06, fallbackStroke: 0.28)
     }
 
     // MARK: - Hotkey capture
@@ -495,28 +482,7 @@ struct OnboardingView: View {
                     permissionGranted[id] = !granted
                 }
             } label: {
-                HStack(spacing: 6) {
-                    if granted {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    Text(granted ? "Granted" : "Grant")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundColor(granted ? .black.opacity(0.85) : .white.opacity(0.85))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(granted ? Color.white.opacity(0.92) : Color.white.opacity(0.04))
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(
-                            granted ? Color.white.opacity(0.35) : Color.white.opacity(0.22),
-                            lineWidth: 1
-                        )
-                )
+                grantPillLabel(granted: granted)
             }
             .buttonStyle(.plain)
         }
@@ -530,6 +496,32 @@ struct OnboardingView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
+    }
+
+    /// Granted → solid white affirmative pill (deliberate high contrast so a
+    /// completed grant reads at a glance). Ungranted → interactive glass, so
+    /// the actionable state is the one that shimmers under the cursor.
+    @ViewBuilder
+    private func grantPillLabel(granted: Bool) -> some View {
+        let content = HStack(spacing: 6) {
+            if granted {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+            }
+            Text(granted ? "Granted" : "Grant")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundColor(granted ? .black.opacity(0.85) : .white.opacity(0.85))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+
+        if granted {
+            content
+                .background(Capsule().fill(Color.white.opacity(0.92)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
+        } else {
+            content.glassCapsule(fallbackFill: 0.04, fallbackStroke: 0.22)
+        }
     }
 
     // MARK: - Step 3 — Done

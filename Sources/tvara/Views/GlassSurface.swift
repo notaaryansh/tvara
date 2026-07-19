@@ -7,8 +7,11 @@ import SwiftUI
 /// look. Every glass surface in the onboarding (panel shell, key-cap chips,
 /// permission cards, buttons) routes through here so the `@available` gate
 /// lives in one place instead of being sprinkled across the views.
-struct GlassSurface: ViewModifier {
-    var cornerRadius: CGFloat
+///
+/// Generic over the clip shape so the same seam covers rounded-rect panels
+/// and capsule pills — see the `glassSurface`/`glassCapsule` conveniences.
+struct GlassSurface<S: InsettableShape>: ViewModifier {
+    var shape: S
     /// Optional glass tint (26+). Ignored on the fallback path.
     var tint: Color? = nil
     /// Reacts to cursor/press with live specular movement (26+). No-op on
@@ -20,22 +23,15 @@ struct GlassSurface: ViewModifier {
     var fallbackStroke: Double = 0.22
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(macOS 26.0, *) {
             content
                 .glassEffect(glass(), in: shape)
         } else {
             content
-                .background(
-                    shape.fill(Color.white.opacity(fallbackFill))
-                )
-                .background(
-                    VisualEffectView(material: fallbackMaterial, blendingMode: .behindWindow)
-                )
+                .background(shape.fill(Color.white.opacity(fallbackFill)))
+                .background(VisualEffectView(material: fallbackMaterial, blendingMode: .behindWindow))
                 .clipShape(shape)
-                .overlay(
-                    shape.strokeBorder(Color.white.opacity(fallbackStroke), lineWidth: 1)
-                )
+                .overlay(shape.strokeBorder(Color.white.opacity(fallbackStroke), lineWidth: 1))
         }
     }
 
@@ -49,8 +45,8 @@ struct GlassSurface: ViewModifier {
 }
 
 extension View {
-    /// Apply a Liquid Glass surface (26+) with a graceful blur fallback.
-    /// See `GlassSurface` for the per-parameter contract.
+    /// Liquid Glass surface (26+) clipped to a continuous rounded rect, with
+    /// a graceful blur fallback. See `GlassSurface` for the parameter contract.
     func glassSurface(
         cornerRadius: CGFloat,
         tint: Color? = nil,
@@ -60,12 +56,27 @@ extension View {
         fallbackStroke: Double = 0.22
     ) -> some View {
         modifier(GlassSurface(
-            cornerRadius: cornerRadius,
-            tint: tint,
-            interactive: interactive,
+            shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
+            tint: tint, interactive: interactive,
             fallbackMaterial: fallbackMaterial,
-            fallbackFill: fallbackFill,
-            fallbackStroke: fallbackStroke
+            fallbackFill: fallbackFill, fallbackStroke: fallbackStroke
+        ))
+    }
+
+    /// Liquid Glass surface (26+) clipped to a capsule — for pill buttons and
+    /// chips. Interactive by default since pills are almost always tappable.
+    func glassCapsule(
+        tint: Color? = nil,
+        interactive: Bool = true,
+        fallbackMaterial: NSVisualEffectView.Material = .hudWindow,
+        fallbackFill: Double = 0.0,
+        fallbackStroke: Double = 0.22
+    ) -> some View {
+        modifier(GlassSurface(
+            shape: Capsule(style: .continuous),
+            tint: tint, interactive: interactive,
+            fallbackMaterial: fallbackMaterial,
+            fallbackFill: fallbackFill, fallbackStroke: fallbackStroke
         ))
     }
 }
