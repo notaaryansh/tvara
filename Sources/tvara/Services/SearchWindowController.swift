@@ -198,13 +198,36 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
                         = self.viewModel.results[self.viewModel.selectedIndex].openTarget {
                     if let thumbIdx = self.viewModel.selectedThumbIndex,
                        photos.indices.contains(thumbIdx) {
-                        if self.viewModel.open(photos[thumbIdx]) { self.hide() }
+                        let photo = photos[thumbIdx]
+                        // Hide BEFORE the NSWorkspace.open call. That call
+                        // does a synchronous LaunchServices roundtrip that
+                        // blocks main for 100-500ms; if we hid after, the
+                        // panel sat on screen for the entire launch window
+                        // and read as tvara being slow rather than the
+                        // launched app taking time to focus.
+                        self.hide()
+                        DispatchQueue.main.async {
+                            _ = self.viewModel.open(photo)
+                        }
                     } else {
                         self.viewModel.zoomToImagesFromCollection()
                     }
                     return nil
                 }
-                if self.viewModel.openSelected() { self.hide() }
+                // Same hide-first pattern as the photo branch above:
+                // the panel must vanish in the same frame as the keystroke
+                // so the user perceives an instant handoff to the launched
+                // app instead of a stalled tvara. Snapshot the result
+                // before hide() — hide()'s reset() clears `results` and
+                // selectedIndex, so a deferred openSelected() would find
+                // an empty array.
+                guard self.viewModel.results.indices.contains(self.viewModel.selectedIndex)
+                else { return nil }
+                let selected = self.viewModel.results[self.viewModel.selectedIndex]
+                self.hide()
+                DispatchQueue.main.async {
+                    _ = self.viewModel.open(selected)
+                }
                 return nil
             case kVK_LeftArrow:
                 // ← only does work on a collection row in the blended /
