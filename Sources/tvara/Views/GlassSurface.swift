@@ -44,6 +44,29 @@ struct GlassSurface<S: InsettableShape>: ViewModifier {
     }
 }
 
+/// Groups nearby glass surfaces so macOS 26 renders and blends them as one
+/// continuous glass mass — adjacent shapes fuse and flex instead of reading
+/// as separate tiles (and it's the scope in which `glassEffectID` morphs can
+/// flow). On the Sonoma/Sequoia fallback path it's a transparent passthrough,
+/// so callers can wrap freely without a second layout.
+struct GlassGroup<Content: View>: View {
+    var spacing: CGFloat?
+    @ViewBuilder var content: Content
+
+    init(spacing: CGFloat? = nil, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) { content }
+        } else {
+            content
+        }
+    }
+}
+
 extension View {
     /// Liquid Glass surface (26+) clipped to a continuous rounded rect, with
     /// a graceful blur fallback. See `GlassSurface` for the parameter contract.

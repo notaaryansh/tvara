@@ -434,19 +434,21 @@ struct OnboardingView: View {
                        title: "A few things tvara needs.",
                        subtitle: "Grant now, or later from Settings.")
 
-            VStack(spacing: 8) {
-                permissionRow(id: "accessibility", symbol: "hand.tap",
-                              name: "Accessibility",
-                              why: "Global hotkey and text injection")
-                permissionRow(id: "contacts", symbol: "person.crop.circle",
-                              name: "Contacts",
-                              why: "Look up people by name for iMessage & email")
-                permissionRow(id: "automation", symbol: "app.connected.to.app.below.fill",
-                              name: "Automation",
-                              why: "Send iMessages and create calendar events")
-                permissionRow(id: "fulldisk", symbol: "internaldrive",
-                              name: "Full Disk Access",
-                              why: "Index files beyond Documents & Downloads")
+            GlassGroup(spacing: 8) {
+                VStack(spacing: 8) {
+                    permissionRow(id: "accessibility", symbol: "hand.tap",
+                                  name: "Accessibility",
+                                  why: "Global hotkey and text injection")
+                    permissionRow(id: "contacts", symbol: "person.crop.circle",
+                                  name: "Contacts",
+                                  why: "Look up people by name for iMessage & email")
+                    permissionRow(id: "automation", symbol: "app.connected.to.app.below.fill",
+                                  name: "Automation",
+                                  why: "Send iMessages and create calendar events")
+                    permissionRow(id: "fulldisk", symbol: "internaldrive",
+                                  name: "Full Disk Access",
+                                  why: "Index files beyond Documents & Downloads")
+                }
             }
 
             Spacer(minLength: 0)
@@ -488,14 +490,7 @@ struct OnboardingView: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.03))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .glassSurface(cornerRadius: 10, fallbackFill: 0.03, fallbackStroke: 0.08)
     }
 
     /// Granted → solid white affirmative pill (deliberate high contrast so a
