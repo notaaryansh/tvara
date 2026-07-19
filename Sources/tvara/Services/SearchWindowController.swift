@@ -22,7 +22,10 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
+        // Ground the glass bubble with a soft ambient shadow. The window is
+        // ~10pt wider than the bubble on each side, so there's transparent
+        // margin for AppKit to render the shadow into.
+        panel.hasShadow = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isMovableByWindowBackground = true
