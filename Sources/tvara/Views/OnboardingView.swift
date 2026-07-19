@@ -58,7 +58,7 @@ struct OnboardingView: View {
             progressDots
         }
         .frame(width: panelWidth, height: panelHeight)
-        .glassSurface(cornerRadius: 20, frost: 0.14, grain: 0.05)
+        .glassSurface(cornerRadius: 20)
         .scaleEffect(appeared ? 1 : 0.94)
         .opacity(appeared ? 1 : 0)
         .animation(.snappy(duration: 0.22, extraBounce: 0), value: stepIndex)
