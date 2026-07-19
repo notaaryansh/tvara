@@ -27,7 +27,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
+        // A soft ambient window shadow grounds the panel as a floating glass
+        // slab instead of a decal painted on the wallpaper — biggest single
+        // "it's glass" cue, and it works on every macOS version. AppKit
+        // shapes the shadow from the rounded glass content's alpha.
+        panel.hasShadow = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isMovableByWindowBackground = true

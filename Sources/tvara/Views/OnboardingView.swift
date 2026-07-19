@@ -23,6 +23,10 @@ struct OnboardingView: View {
     @State private var listeningPulse: Bool = false
     @State private var hotkeyHint: String? = nil
 
+    /// Entrance materialize — the panel scales + fades in on first appear
+    /// rather than snapping in, so it reads as glass settling into place.
+    @State private var appeared: Bool = false
+
     private let totalSteps = 4
     private let panelWidth: CGFloat = 680
     private let panelHeight: CGFloat = 540
@@ -50,15 +54,15 @@ struct OnboardingView: View {
             progressDots
         }
         .frame(width: panelWidth, height: panelHeight)
-        .background(
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-        )
+        .glassSurface(cornerRadius: 20)
+        .scaleEffect(appeared ? 1 : 0.94)
+        .opacity(appeared ? 1 : 0)
         .animation(.snappy(duration: 0.22, extraBounce: 0), value: stepIndex)
+        .onAppear {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+                appeared = true
+            }
+        }
     }
 
     // MARK: - Overlays
