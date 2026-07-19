@@ -27,6 +27,10 @@ struct OnboardingView: View {
     /// rather than snapping in, so it reads as glass settling into place.
     @State private var appeared: Bool = false
 
+    /// Shared namespace so the key-cap chips morph (glass flows between
+    /// shapes) as the captured combo changes during listening.
+    @Namespace private var glassNS
+
     private let totalSteps = 4
     private let panelWidth: CGFloat = 680
     private let panelHeight: CGFloat = 540
@@ -163,22 +167,25 @@ struct OnboardingView: View {
     /// live as modifiers are held; on the finalizing keypress the letter
     /// chip lands and mode flips to .registered.
     private var chipsBlock: some View {
-        HStack(spacing: 10) {
-            if hotkeyChips.isEmpty && hotkeyMode == .listening {
-                waitingPlaceholder
-                    .transition(.opacity)
-            } else {
-                ForEach(hotkeyChips, id: \.self) { chip in
-                    keyCapChip(chip)
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.55).combined(with: .opacity),
-                            removal: .scale(scale: 0.85).combined(with: .opacity)
-                        ))
+        GlassGroup(spacing: 10) {
+            HStack(spacing: 10) {
+                if hotkeyChips.isEmpty && hotkeyMode == .listening {
+                    waitingPlaceholder
+                        .transition(.opacity)
+                } else {
+                    ForEach(hotkeyChips, id: \.self) { chip in
+                        keyCapChip(chip)
+                            .glassMorphID(chip, in: glassNS)
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.55).combined(with: .opacity),
+                                removal: .scale(scale: 0.85).combined(with: .opacity)
+                            ))
+                    }
                 }
             }
+            .frame(minWidth: 130, minHeight: 62, alignment: .leading)
+            .animation(.spring(response: 0.34, dampingFraction: 0.62), value: hotkeyChips)
         }
-        .frame(minWidth: 130, minHeight: 62, alignment: .leading)
-        .animation(.spring(response: 0.34, dampingFraction: 0.62), value: hotkeyChips)
     }
 
     /// Softly pulsing dashed slot shown while listening but no keys are

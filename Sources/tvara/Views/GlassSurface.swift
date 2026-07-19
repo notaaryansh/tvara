@@ -68,6 +68,20 @@ struct GlassGroup<Content: View>: View {
 }
 
 extension View {
+    /// Tag a glass surface with a morph identity (26+). Inside a `GlassGroup`,
+    /// when a tagged surface is inserted/removed the glass *flows* to/from the
+    /// nearest matching id instead of hard cutting — e.g. the key-cap chips
+    /// extending as you add modifiers. No-op on the fallback path, where the
+    /// caller's own `.transition` handles the change.
+    @ViewBuilder
+    func glassMorphID(_ id: some Hashable & Sendable, in namespace: Namespace.ID) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffectID(id, in: namespace)
+        } else {
+            self
+        }
+    }
+
     /// Liquid Glass surface (26+) clipped to a continuous rounded rect, with
     /// a graceful blur fallback. See `GlassSurface` for the parameter contract.
     func glassSurface(
