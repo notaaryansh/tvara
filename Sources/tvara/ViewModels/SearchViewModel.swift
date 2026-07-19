@@ -192,6 +192,16 @@ final class SearchViewModel: ObservableObject {
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
     private let historyStore: SelectionHistoryStore
+
+    /// Called synchronously inside `open()` for any dismissable result,
+    /// BEFORE the slow NSWorkspace.open / AX work runs. Lets the search
+    /// panel vanish in the same frame as the keystroke or click —
+    /// otherwise it sits visible for the 100-500 ms LaunchServices
+    /// roundtrip and reads as tvara being slow. SearchWindowController
+    /// wires this to its own hide() at init. The contract is "if you set
+    /// me, every dismissable open() call invokes me first."
+    var onDismiss: (() -> Void)?
+
     // Terminal history service intentionally not queried right now —
     // suppressed per UX direction. Kept in the codebase so we can re-enable
     // by adding back the async let + a SearchTab case.
@@ -1546,15 +1556,54 @@ final class SearchViewModel: ObservableObject {
 
     @discardableResult
     func open(_ result: SearchResult) -> Bool {
+        // History first — needs the still-populated `query`/`results`
+        // BEFORE onDismiss() → reset() wipes them. The Task it spawns
+        // captures its inputs by value, so dispatch order is safe.
         recordFrequencySignal(for: result)
+
+        // In-panel-only outcomes never dismiss; perform synchronously
+        // and bail. These are navigation row clicks (zoom into Images,
+        // expand a capped section), not launch actions.
+        switch result.openTarget {
+        case .imagesCollection:
+            zoomToImagesFromCollection()
+            return false
+        case .expandSection(let kindRawValue, _):
+            toggleSectionExpanded(kindRawValue: kindRawValue)
+            return false
+        default:
+            break
+        }
+
+        // Dismissable outcomes: hide the panel in THIS runloop tick,
+        // then run the slow launch work (NSWorkspace.open, AX calls,
+        // AppleScript) on the NEXT tick. The gap is what turns the
+        // launch into a perceived-instant handoff — orderOut has been
+        // queued for the window server before we ever touch
+        // LaunchServices, so by the time LaunchServices blocks for
+        // 100-500 ms, our panel is already gone. Without this two-step,
+        // the panel sits on screen for the full launch window and reads
+        // as tvara being slow when the wait is really the target app
+        // coming up.
+        onDismiss?()
+        DispatchQueue.main.async { [weak self] in
+            self?.performLaunch(result)
+        }
+        return true
+    }
+
+    /// Actual launch work for a dismissable result. Runs one runloop
+    /// tick after `onDismiss()` so the panel has a chance to vanish
+    /// before any blocking LaunchServices / AX / AppleScript call. All
+    /// inputs are captured by value at dispatch time; nothing in here
+    /// reads ViewModel state that reset() may have cleared.
+    private func performLaunch(_ result: SearchResult) {
         switch result.openTarget {
         case .url(let s):
-            guard let url = URL(string: s) else { return false }
-            NSWorkspace.shared.open(url)
-            return true
+            if let url = URL(string: s) { NSWorkspace.shared.open(url) }
 
         case .file(let path):
-            return NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            _ = NSWorkspace.shared.open(URL(fileURLWithPath: path))
 
         case .whatsappChat(let jid, let messageText):
             if !messageText.isEmpty {
@@ -1568,10 +1617,10 @@ final class SearchViewModel: ObservableObject {
                 if phone.allSatisfy({ $0.isNumber }),
                    let url = URL(string: "whatsapp://send?phone=\(phone)") {
                     NSWorkspace.shared.open(url)
-                    return true
+                    return
                 }
             }
-            return NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/WhatsApp.app"))
+            _ = NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/WhatsApp.app"))
 
         case .imessageChat(let handle, let messageText):
             if !messageText.isEmpty {
@@ -1582,15 +1631,14 @@ final class SearchViewModel: ObservableObject {
             if !handle.isEmpty,
                let url = URL(string: "sms:\(handle)") {
                 NSWorkspace.shared.open(url)
-                return true
+                return
             }
-            return NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Messages.app"))
+            _ = NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Messages.app"))
 
         case .copyToClipboard(let s):
             let pb = NSPasteboard.general
             pb.clearContents()
             pb.setString(s, forType: .string)
-            return true
 
         case .notesNote(let title):
             // Apple Notes has no stable external per-note deep link, so we
@@ -1602,51 +1650,36 @@ final class SearchViewModel: ObservableObject {
                 pb.clearContents()
                 pb.setString(title, forType: .string)
             }
-            return NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Notes.app"))
+            _ = NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Notes.app"))
 
         case .spotifyPlay(let uri, let shuffle):
             // AppleScript blocks until Spotify responds (~100ms); run off
-            // the main thread so the launcher's dismiss animation isn't
-            // janky. We treat any failure as "still consider it opened"
-            // — Spotify will be foregrounded by the activate command even
-            // if the play track step fails (e.g. invalid URI).
+            // the main thread so even the deferred dispatch isn't visibly
+            // janky. We don't care about failure — Spotify activates
+            // anyway via the play step's foreground side effect.
             Task.detached {
                 try? SpotifyPlayer.play(uri: uri, shuffle: shuffle)
             }
-            return true
 
         case .windowAction(let action):
             // AX position/size set runs synchronously and returns in well
-            // under a frame — fine on the main actor. Returning true
-            // closes the panel; the freshly-snapped window comes back to
-            // the foreground because its app was already the previously
+            // under a frame. The freshly-snapped window comes back to the
+            // foreground because its app was already the previously
             // frontmost.
-            return windowService.execute(action)
+            _ = windowService.execute(action)
 
         case .systemAction(let action):
             // NSAppleScript dispatch runs on a detached task inside the
-            // service; we return true immediately so the panel dismisses.
-            // Shut down / restart / log out trigger macOS' own 60-second
-            // confirmation dialog, so there's no extra safety prompt
-            // needed from our side.
-            return systemActionsService.execute(action)
+            // service. Shut down / restart / log out trigger macOS' own
+            // 60-second confirmation dialog, so no extra safety prompt
+            // needed here.
+            _ = systemActionsService.execute(action)
 
-        case .imagesCollection:
-            // The blended-view photo strip is a navigation row, not an
-            // openable result. SearchWindowController intercepts Enter
-            // on this case to either zoom into Images or open the
-            // focused thumb's underlying photo — so reaching open()
-            // with .imagesCollection means a tap/path got past the
-            // controller (mouse click). Treat as "zoom into images,
-            // don't dismiss panel."
-            zoomToImagesFromCollection()
-            return false
-
-        case .expandSection(let kindRawValue, _):
-            // Footer row from a capped messaging section. Toggle
-            // expansion in place; never dismisses the panel.
-            toggleSectionExpanded(kindRawValue: kindRawValue)
-            return false
+        case .imagesCollection, .expandSection:
+            // Already handled in open() above; reaching here means we
+            // dispatched a result whose target type changed underneath us.
+            // Defensive no-op.
+            break
         }
     }
 

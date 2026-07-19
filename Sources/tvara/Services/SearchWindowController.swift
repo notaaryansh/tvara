@@ -42,6 +42,11 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
         // for a frame before snapping into place.
         repositionForCurrentScreen()
         installKeyMonitor()
+        // ViewModel's open() pipeline calls this synchronously the moment
+        // a dismissable result is selected (keyboard OR mouse). Routes to
+        // hide() so the panel vanishes in the same frame as the action,
+        // before LaunchServices blocks on launching the target app.
+        viewModel.onDismiss = { [weak self] in self?.hide() }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -192,42 +197,22 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
                 //     return nil
                 // }
                 // Photo collection row: row-level ↩ zooms into Images;
-                // thumb-level ↩ opens the focused photo and dismisses.
+                // thumb-level ↩ opens the focused photo. Dismissal of
+                // the panel is now ViewModel-owned (via the onDismiss
+                // callback wired in init), so both paths can just call
+                // through without any local hide / dispatch dance.
                 if self.viewModel.results.indices.contains(self.viewModel.selectedIndex),
                    case .imagesCollection(let photos)
                         = self.viewModel.results[self.viewModel.selectedIndex].openTarget {
                     if let thumbIdx = self.viewModel.selectedThumbIndex,
                        photos.indices.contains(thumbIdx) {
-                        let photo = photos[thumbIdx]
-                        // Hide BEFORE the NSWorkspace.open call. That call
-                        // does a synchronous LaunchServices roundtrip that
-                        // blocks main for 100-500ms; if we hid after, the
-                        // panel sat on screen for the entire launch window
-                        // and read as tvara being slow rather than the
-                        // launched app taking time to focus.
-                        self.hide()
-                        DispatchQueue.main.async {
-                            _ = self.viewModel.open(photo)
-                        }
+                        _ = self.viewModel.open(photos[thumbIdx])
                     } else {
                         self.viewModel.zoomToImagesFromCollection()
                     }
                     return nil
                 }
-                // Same hide-first pattern as the photo branch above:
-                // the panel must vanish in the same frame as the keystroke
-                // so the user perceives an instant handoff to the launched
-                // app instead of a stalled tvara. Snapshot the result
-                // before hide() — hide()'s reset() clears `results` and
-                // selectedIndex, so a deferred openSelected() would find
-                // an empty array.
-                guard self.viewModel.results.indices.contains(self.viewModel.selectedIndex)
-                else { return nil }
-                let selected = self.viewModel.results[self.viewModel.selectedIndex]
-                self.hide()
-                DispatchQueue.main.async {
-                    _ = self.viewModel.open(selected)
-                }
+                _ = self.viewModel.openSelected()
                 return nil
             case kVK_LeftArrow:
                 // ← only does work on a collection row in the blended /
