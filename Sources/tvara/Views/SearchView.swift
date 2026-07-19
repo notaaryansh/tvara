@@ -45,7 +45,7 @@ struct SearchView: View {
             }
         }
         .frame(width: bubbleWidth)
-        .glassSurface(cornerRadius: 16)
+        .glassSurface(cornerRadius: 16, frost: 0.14, grain: 0.05)
         .padding(.top, 4)
         // Single binary mode token drives the bubble's resize. Each
         // discrete mode (no query, results-pending, results-shown,

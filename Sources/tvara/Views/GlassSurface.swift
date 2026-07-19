@@ -17,6 +17,12 @@ struct GlassSurface<S: InsettableShape>: ViewModifier {
     /// Reacts to cursor/press with live specular movement (26+). No-op on
     /// the fallback path.
     var interactive: Bool = false
+    /// Peak opacity of a top-down white frost gradient laid *between* the
+    /// glass and the content — makes big surfaces read bright/milky like
+    /// Apple glass even over a dark backdrop. 0 = off (chips/pills stay clean).
+    var frost: Double = 0.0
+    /// Opacity of the fine grain overlay (see `NoiseTexture`). 0 = off.
+    var grain: Double = 0.0
     /// Fallback-only knobs so callers can match today's per-surface look.
     var fallbackMaterial: NSVisualEffectView.Material = .hudWindow
     var fallbackFill: Double = 0.0
@@ -25,14 +31,39 @@ struct GlassSurface<S: InsettableShape>: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
             content
+                .background(decor)
                 .glassEffect(glass(), in: shape)
         } else {
             content
+                .background(decor)
                 .background(shape.fill(Color.white.opacity(fallbackFill)))
                 .background(VisualEffectView(material: fallbackMaterial, blendingMode: .behindWindow))
                 .clipShape(shape)
                 .overlay(shape.strokeBorder(Color.white.opacity(fallbackStroke), lineWidth: 1))
         }
+    }
+
+    /// Frost gradient + grain, clipped to the shape and non-interactive. Sits
+    /// behind the content (so text stays crisp) but in front of the glass.
+    @ViewBuilder private var decor: some View {
+        ZStack {
+            if frost > 0 {
+                shape.fill(
+                    LinearGradient(
+                        colors: [.white.opacity(frost), .white.opacity(frost * 0.12), .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+            }
+            if grain > 0 {
+                Image(nsImage: NoiseTexture.shared)
+                    .resizable(resizingMode: .tile)
+                    .clipShape(shape)
+                    .blendMode(.overlay)
+                    .opacity(grain)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     @available(macOS 26.0, *)
@@ -88,6 +119,8 @@ extension View {
         cornerRadius: CGFloat,
         tint: Color? = nil,
         interactive: Bool = false,
+        frost: Double = 0.0,
+        grain: Double = 0.0,
         fallbackMaterial: NSVisualEffectView.Material = .hudWindow,
         fallbackFill: Double = 0.0,
         fallbackStroke: Double = 0.22
@@ -95,6 +128,7 @@ extension View {
         modifier(GlassSurface(
             shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
             tint: tint, interactive: interactive,
+            frost: frost, grain: grain,
             fallbackMaterial: fallbackMaterial,
             fallbackFill: fallbackFill, fallbackStroke: fallbackStroke
         ))
