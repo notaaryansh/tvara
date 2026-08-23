@@ -192,6 +192,16 @@ final class SearchViewModel: ObservableObject {
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
     private let historyStore: SelectionHistoryStore
+
+    /// Called synchronously inside `open()` for any dismissable result,
+    /// BEFORE the slow NSWorkspace.open / AX work runs. Lets the search
+    /// panel vanish in the same frame as the keystroke or click —
+    /// otherwise it sits visible for the 100-500 ms LaunchServices
+    /// roundtrip and reads as tvara being slow. SearchWindowController
+    /// wires this to its own hide() at init. The contract is "if you set
+    /// me, every dismissable open() call invokes me first."
+    var onDismiss: (() -> Void)?
+
     // Terminal history service intentionally not queried right now —
     // suppressed per UX direction. Kept in the codebase so we can re-enable
     // by adding back the async let + a SearchTab case.
@@ -202,6 +212,14 @@ final class SearchViewModel: ObservableObject {
     /// the "Thinking…" spinner pile-up where older tasks leave the flag
     /// set true.
     private var inflightSmartTask: Task<Void, Never>?
+
+    /// Latest in-flight image-search task. Cancelled on every new
+    /// keystroke so the actor inside ImageIndexService can short-circuit
+    /// the old query instead of finishing a doomed 300-500ms cycle while
+    /// the user is already typing the next one. Without this the actor
+    /// (which is serial) queues the new search behind the old, and the
+    /// UI looks frozen until both complete.
+    private var inflightImageTask: Task<Void, Never>?
 
     private static let allTabResultCap = 60
     private static let messagesTabResultCap = 50
@@ -266,6 +284,9 @@ final class SearchViewModel: ObservableObject {
         self.settingsService = settingsService
         self.eventBusPipeline = EventBusPipeline(
             imessage: imessageService,
+            whatsapp: whatsappService,
+            mail: mailService,
+            discord: discordService,
             images: imageService
         )
         self.folderService = folderService
@@ -273,6 +294,12 @@ final class SearchViewModel: ObservableObject {
         self.smartService = smartService
         self.embeddingStore = embeddingStore
         self.historyStore = historyStore
+
+        // Drop the ~300 MB CLIP/MPSGraph state after 5 min idle (or on
+        // system memory pressure). Live FSEvents indexing and backfill
+        // sweeps both go through ensureModels(), so they just re-trigger
+        // a 50-100ms reload and run normally.
+        imageService.startMemoryPressureMonitoring()
 
         // v0 fires performSearch on EVERY keystroke — no debounce. The
         // command sources are sync alias-table loops (~5 µs each), so
@@ -312,6 +339,10 @@ final class SearchViewModel: ObservableObject {
         Task { [fileService] in await fileService.warmCache() }
         Task { [notesService] in await notesService.warmCache() }
         Task { [notionService] in await notionService.warmCache() }
+        // Forces the lazy static-let icns→TIFF→PNG transcode off the
+        // main thread before the first keystroke can trip it. Measured
+        // 483 ms on a cold "blu" → Bluetooth match without this.
+        Task { [settingsService] in await settingsService.warmCache() }
         // MobileCLIP-S2 image index — warms the CoreML models and triggers
         // an incremental sweep of ~/Pictures, ~/Desktop, ~/Downloads.
         Task.detached { [imageService] in await imageService.warmCache() }
@@ -377,6 +408,18 @@ final class SearchViewModel: ObservableObject {
     private static var minimumQueryLength: Int { minimumQueryLengthForUI }
 
     private func performSearch(_ query: String) {
+        let __t0 = CFAbsoluteTimeGetCurrent()
+        var __stage = __t0
+        func __mark(_ name: String) {
+            let now = CFAbsoluteTimeGetCurrent()
+            let dt = (now - __stage) * 1000
+            if dt > 1.0 { NSLog("Main.performSearch: %@ %.1fms", name, dt) }
+            __stage = now
+        }
+        defer {
+            let total = (CFAbsoluteTimeGetCurrent() - __t0) * 1000
+            if total > 5.0 { NSLog("Main.performSearch: TOTAL %.1fms", total) }
+        }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         // Treat anything below the minimum length the same as empty —
         // clears everything and shows the empty state. Avoids the
@@ -407,10 +450,10 @@ final class SearchViewModel: ObservableObject {
         // still constructed, properties still exist — but are not queried
         // or merged here. Flip `Self.contentSearchEnabled = true` when
         // we're ready to bring content search back into the UI.
-        windowResults        = windowService.match(query: trimmed)
-        settingsResults      = settingsService.match(query: trimmed)
-        folderResults        = folderService.match(query: trimmed)
-        systemActionResults  = systemActionsService.match(query: trimmed)
+        windowResults        = windowService.match(query: trimmed); __mark("windowService.match")
+        settingsResults      = settingsService.match(query: trimmed); __mark("settingsService.match")
+        folderResults        = folderService.match(query: trimmed); __mark("folderService.match")
+        systemActionResults  = systemActionsService.match(query: trimmed); __mark("systemActionsService.match")
 
         // Clear EVERY @Published source array SYNCHRONOUSLY so the merged
         // view doesn't briefly show stale results from the previous query
@@ -422,12 +465,13 @@ final class SearchViewModel: ObservableObject {
         mailResults = []; notesResults = []; notionResults = []
         linearResults = []; spotifyResults = []; clipboardResults = []
         imageResults = []
+        __mark("clear 12 @Published arrays")
         // Apps NOW runs synchronously against an in-memory index built
         // at launch (warmCache) — same shape as settings/window/folder.
         // This is what makes "spoti" surface Spotify in the same frame
         // as the keystroke instead of after the 80ms debounce + actor
         // hop. Assigned AFTER clearing so a cold cache leaves it [].
-        appResults           = appService.match(query: trimmed)
+        appResults           = appService.match(query: trimmed); __mark("appService.match")
         // Populate the per-section loading set SYNCHRONOUSLY here, before
         // the debounce/smart-detection task even starts. That way the
         // section skeleton (every kind's header with a spinner) renders
@@ -476,6 +520,12 @@ final class SearchViewModel: ObservableObject {
         // Cancel any in-flight smart task from a previous query so it
         // doesn't quietly land late and toggle UI state.
         inflightSmartTask?.cancel()
+        // Same for the image actor: cancel the prior search so the
+        // ImageIndexService can bail out of its in-flight pipeline
+        // (it checks Task.isCancelled between phases). Without this the
+        // actor — serialized — finishes the old query before starting
+        // the new one, and the gap reads as a hang.
+        inflightImageTask?.cancel()
 
         if Self.contentSearchEnabled {
             // ── content search (DISABLED FOR v0) ─────────────────────
@@ -714,8 +764,13 @@ final class SearchViewModel: ObservableObject {
         // Images are blacklisted from the frequency reranker (stableId is
         // nil for every row) and use a different search signature, so they
         // stay outside the generic fan-out.
-        Task.detached { [weak self] in
+        // Hold a reference so the next keystroke can cancel us. The
+        // actor checks Task.isCancelled between phases and returns []
+        // early, so a fast typer doesn't queue searches behind each
+        // other on the serial actor.
+        inflightImageTask = Task.detached { [weak self] in
             let r = await imageService.search(query)
+            if Task.isCancelled { return }
             await self?.assignSection(.images, searchID: searchID, results: r)
         }
 
@@ -756,6 +811,7 @@ final class SearchViewModel: ObservableObject {
         results: [SearchResult]
     ) {
         guard searchID == currentSearchID else { return }
+        let __t0 = CFAbsoluteTimeGetCurrent()
         switch kind {
         case .files:     fileResults = results
         case .whatsapp:  whatsappResults = results
@@ -768,6 +824,8 @@ final class SearchViewModel: ObservableObject {
         case .apps:      break  // apps populate synchronously in search()
         }
         finishSection(kind)
+        let dt = (CFAbsoluteTimeGetCurrent() - __t0) * 1000
+        if dt > 2.0 { NSLog("Main.assignSection(%@, n=%d): %.1fms", "\(kind)", results.count, dt) }
     }
 
     private func assignNotion(searchID: Int, results: [SearchResult], query: String) {
@@ -1089,7 +1147,10 @@ final class SearchViewModel: ObservableObject {
     /// flat selection index space) so ↑/↓ keeps walking a single list.
     var blendedSections: [BlendedSection] {
         if let cached = blendedSectionsCache { return cached }
+        let __t0 = CFAbsoluteTimeGetCurrent()
         let computed = computeBlendedSections()
+        let dt = (CFAbsoluteTimeGetCurrent() - __t0) * 1000
+        if dt > 2.0 { NSLog("Main.blendedSections recompute %.1fms (n=%d)", dt, computed.count) }
         blendedSectionsCache = computed
         return computed
     }
@@ -1192,16 +1253,28 @@ final class SearchViewModel: ObservableObject {
             }
         }
 
-        // Fuzzy suppression: if ANY non-fuzzy match exists across all
-        // sections, drop fuzzy matches everywhere. Fuzzy is a typo-
-        // tolerant fallback — only visible when nothing else matched.
-        let hasNonFuzzy = sections.flatMap(\.items)
-            .contains(where: { !$0.isFuzzyMatch })
-        if hasNonFuzzy {
-            sections = sections.compactMap { sec in
-                let filtered = sec.items.filter { !$0.isFuzzyMatch }
-                return filtered.isEmpty ? nil : BlendedSection(kind: sec.kind, items: filtered)
-            }
+        // Per-source fuzzy policy.
+        //
+        // Command-style sections (`.apps` — covers apps, windows,
+        // settings, folders, system actions, third-party shortcuts):
+        // commands are precision-driven. A clean exact match means the
+        // user wants exactly that — typo guesses alongside it are
+        // noise, so suppress fuzzy in this section when any non-fuzzy
+        // result exists.
+        //
+        // Content sections (messages/mail/notes/images/files/clipboard):
+        // recall-driven. Show fuzzy results alongside exact ones —
+        // each source ranks its fuzzy hits in a tier strictly below
+        // its exact band (e.g. ImageIndexService rank tiers 100/600/900
+        // for fuzzy vs `Int(fusedScore * 100_000)` for exact), so the
+        // ordering is correct by construction.
+        let suppressFuzzyIfMixed: Set<BlendedSection.Kind> = [.apps]
+        sections = sections.compactMap { sec in
+            guard suppressFuzzyIfMixed.contains(sec.kind) else { return sec }
+            let hasNonFuzzy = sec.items.contains(where: { !$0.isFuzzyMatch })
+            guard hasNonFuzzy else { return sec }
+            let filtered = sec.items.filter { !$0.isFuzzyMatch }
+            return filtered.isEmpty ? nil : BlendedSection(kind: sec.kind, items: filtered)
         }
 
         return sections
@@ -1483,15 +1556,54 @@ final class SearchViewModel: ObservableObject {
 
     @discardableResult
     func open(_ result: SearchResult) -> Bool {
+        // History first — needs the still-populated `query`/`results`
+        // BEFORE onDismiss() → reset() wipes them. The Task it spawns
+        // captures its inputs by value, so dispatch order is safe.
         recordFrequencySignal(for: result)
+
+        // In-panel-only outcomes never dismiss; perform synchronously
+        // and bail. These are navigation row clicks (zoom into Images,
+        // expand a capped section), not launch actions.
+        switch result.openTarget {
+        case .imagesCollection:
+            zoomToImagesFromCollection()
+            return false
+        case .expandSection(let kindRawValue, _):
+            toggleSectionExpanded(kindRawValue: kindRawValue)
+            return false
+        default:
+            break
+        }
+
+        // Dismissable outcomes: hide the panel in THIS runloop tick,
+        // then run the slow launch work (NSWorkspace.open, AX calls,
+        // AppleScript) on the NEXT tick. The gap is what turns the
+        // launch into a perceived-instant handoff — orderOut has been
+        // queued for the window server before we ever touch
+        // LaunchServices, so by the time LaunchServices blocks for
+        // 100-500 ms, our panel is already gone. Without this two-step,
+        // the panel sits on screen for the full launch window and reads
+        // as tvara being slow when the wait is really the target app
+        // coming up.
+        onDismiss?()
+        DispatchQueue.main.async { [weak self] in
+            self?.performLaunch(result)
+        }
+        return true
+    }
+
+    /// Actual launch work for a dismissable result. Runs one runloop
+    /// tick after `onDismiss()` so the panel has a chance to vanish
+    /// before any blocking LaunchServices / AX / AppleScript call. All
+    /// inputs are captured by value at dispatch time; nothing in here
+    /// reads ViewModel state that reset() may have cleared.
+    private func performLaunch(_ result: SearchResult) {
         switch result.openTarget {
         case .url(let s):
-            guard let url = URL(string: s) else { return false }
-            NSWorkspace.shared.open(url)
-            return true
+            if let url = URL(string: s) { NSWorkspace.shared.open(url) }
 
         case .file(let path):
-            return NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            _ = NSWorkspace.shared.open(URL(fileURLWithPath: path))
 
         case .whatsappChat(let jid, let messageText):
             if !messageText.isEmpty {
@@ -1505,10 +1617,10 @@ final class SearchViewModel: ObservableObject {
                 if phone.allSatisfy({ $0.isNumber }),
                    let url = URL(string: "whatsapp://send?phone=\(phone)") {
                     NSWorkspace.shared.open(url)
-                    return true
+                    return
                 }
             }
-            return NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/WhatsApp.app"))
+            _ = NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/WhatsApp.app"))
 
         case .imessageChat(let handle, let messageText):
             if !messageText.isEmpty {
@@ -1519,15 +1631,14 @@ final class SearchViewModel: ObservableObject {
             if !handle.isEmpty,
                let url = URL(string: "sms:\(handle)") {
                 NSWorkspace.shared.open(url)
-                return true
+                return
             }
-            return NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Messages.app"))
+            _ = NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Messages.app"))
 
         case .copyToClipboard(let s):
             let pb = NSPasteboard.general
             pb.clearContents()
             pb.setString(s, forType: .string)
-            return true
 
         case .notesNote(let title):
             // Apple Notes has no stable external per-note deep link, so we
@@ -1539,51 +1650,36 @@ final class SearchViewModel: ObservableObject {
                 pb.clearContents()
                 pb.setString(title, forType: .string)
             }
-            return NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Notes.app"))
+            _ = NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Notes.app"))
 
         case .spotifyPlay(let uri, let shuffle):
             // AppleScript blocks until Spotify responds (~100ms); run off
-            // the main thread so the launcher's dismiss animation isn't
-            // janky. We treat any failure as "still consider it opened"
-            // — Spotify will be foregrounded by the activate command even
-            // if the play track step fails (e.g. invalid URI).
+            // the main thread so even the deferred dispatch isn't visibly
+            // janky. We don't care about failure — Spotify activates
+            // anyway via the play step's foreground side effect.
             Task.detached {
                 try? SpotifyPlayer.play(uri: uri, shuffle: shuffle)
             }
-            return true
 
         case .windowAction(let action):
             // AX position/size set runs synchronously and returns in well
-            // under a frame — fine on the main actor. Returning true
-            // closes the panel; the freshly-snapped window comes back to
-            // the foreground because its app was already the previously
+            // under a frame. The freshly-snapped window comes back to the
+            // foreground because its app was already the previously
             // frontmost.
-            return windowService.execute(action)
+            _ = windowService.execute(action)
 
         case .systemAction(let action):
             // NSAppleScript dispatch runs on a detached task inside the
-            // service; we return true immediately so the panel dismisses.
-            // Shut down / restart / log out trigger macOS' own 60-second
-            // confirmation dialog, so there's no extra safety prompt
-            // needed from our side.
-            return systemActionsService.execute(action)
+            // service. Shut down / restart / log out trigger macOS' own
+            // 60-second confirmation dialog, so no extra safety prompt
+            // needed here.
+            _ = systemActionsService.execute(action)
 
-        case .imagesCollection:
-            // The blended-view photo strip is a navigation row, not an
-            // openable result. SearchWindowController intercepts Enter
-            // on this case to either zoom into Images or open the
-            // focused thumb's underlying photo — so reaching open()
-            // with .imagesCollection means a tap/path got past the
-            // controller (mouse click). Treat as "zoom into images,
-            // don't dismiss panel."
-            zoomToImagesFromCollection()
-            return false
-
-        case .expandSection(let kindRawValue, _):
-            // Footer row from a capped messaging section. Toggle
-            // expansion in place; never dismisses the panel.
-            toggleSectionExpanded(kindRawValue: kindRawValue)
-            return false
+        case .imagesCollection, .expandSection:
+            // Already handled in open() above; reaching here means we
+            // dispatched a result whose target type changed underneath us.
+            // Defensive no-op.
+            break
         }
     }
 

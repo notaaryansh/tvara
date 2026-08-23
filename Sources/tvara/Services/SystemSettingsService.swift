@@ -265,10 +265,22 @@ final class SystemSettingsService {
         }
     }
 
-    /// PNG bytes of the System Settings.app icon, computed once at
-    /// class-load and cached. Passed through every row's `iconData` so
-    /// SearchResultRow's existing `.url` branch picks up the real app
-    /// icon instead of falling back to the SF Symbol gear.
+    /// Eagerly resolve `settingsAppIconData` off-main at app launch so
+    /// the first keystroke that hits a Settings pane doesn't trigger
+    /// the underlying icns→TIFF→PNG transcode synchronously on the main
+    /// thread. Measured at ~480 ms cold the first time a query like
+    /// "blu" matched Bluetooth — that's the entire keystroke-lag budget
+    /// gone in one static-let dispatch_once. Mirrors AppSearchService /
+    /// SmartSearchService / etc.; called from SearchViewModel.init.
+    func warmCache() async {
+        _ = Self.settingsAppIconData
+    }
+
+    /// PNG bytes of the System Settings.app icon. Lazy `static let`, so
+    /// the underlying icns→TIFF→PNG transcode (~480 ms) fires on
+    /// whichever thread reads this first — call `warmCache()` from a
+    /// background Task at launch so the first reader isn't the main
+    /// thread mid-keystroke.
     private static let settingsAppIconData: Data? = {
         let icon = NSWorkspace.shared.icon(
             forFile: "/System/Applications/System Settings.app"

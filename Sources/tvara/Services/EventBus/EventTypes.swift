@@ -7,6 +7,9 @@ enum EventType {
     static let messageAdded = "message_added"
     static let fileAdded = "file_added"
     static let imageAdded = "image_added"
+    static let mailAdded = "mail_added"
+    static let discordScan = "discord_scan"
+    static let ocrVocabBackfill = "ocr_vocab_backfill"
 }
 
 /// Canonical strings stored in `events.source`.
@@ -32,6 +35,31 @@ struct FileAddedPayload: Codable {
 
 struct ImageAddedPayload: Codable {
     let path: String
+}
+
+/// One `.emlx` file landing in Mail's storage tree. mtime travels with the
+/// payload so the worker can avoid re-parsing already-indexed files
+/// without touching the filesystem.
+struct MailAddedPayload: Codable {
+    let path: String
+    let mtime: Double
+}
+
+/// Signal — "Discord's Chromium HTTP cache changed, run an incremental
+/// scan." Carries no rowid/path: the service already tracks
+/// `lastBuildTime` internally and walks every cache entry newer than
+/// that. The `bucket` field lets the dedupe-key UNIQUE constraint
+/// collapse a burst of FSEvents within the same time window into one
+/// queued scan.
+struct DiscordScanPayload: Codable {
+    let bucket: Int64
+}
+
+/// One image's contribution to the spellfix1 OCR vocab. Carries just the
+/// `images.id` — the worker re-reads the OCR text inside the actor so we
+/// never hold thousands of full OCR strings in memory at once.
+struct OCRVocabBackfillPayload: Codable {
+    let imageID: Int64
 }
 
 // MARK: - Codable convenience

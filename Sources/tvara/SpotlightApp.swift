@@ -8,6 +8,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var viewModel: SearchViewModel!
     private var overlayController: WindowSnapOverlayController!
     private var statusItem: NSStatusItem!
+    private var onboardingController: OnboardingWindowController!
+
+    /// Session-only flag while the onboarding is still a mock. Every
+    /// launch, the first ⌘K opens the onboarding panel; Skip / Finish
+    /// flips this so subsequent presses open the real search panel.
+    /// Swap for `@UserDefaults` once the flow is wired up for real.
+    private var hasSeenOnboarding: Bool = false
 
     static func main() {
         let app = NSApplication.shared
@@ -37,11 +44,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel: viewModel, windowService: windowService
         )
 
+        onboardingController = OnboardingWindowController()
+        onboardingController.onDismiss = { [weak self] in
+            self?.hasSeenOnboarding = true
+        }
+
         HotKeyManager.shared.register(
             keyCode: UInt32(kVK_ANSI_K),
             modifiers: UInt32(cmdKey)
         ) { [weak self] in
-            self?.windowController.toggle()
+            self?.handleHotkey()
         }
 
         installMenu()
@@ -99,6 +111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Clear search history",
                      action: #selector(clearSearchHistory),
                      keyEquivalent: "")
+        menu.addItem(withTitle: "Show onboarding (dev)",
+                     action: #selector(showOnboarding),
+                     keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Quit tvara",
                      action: #selector(NSApplication.terminate(_:)),
@@ -115,6 +130,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSearch() {
         windowController.toggle()
+    }
+
+    private func handleHotkey() {
+        if hasSeenOnboarding {
+            windowController.toggle()
+        } else {
+            onboardingController.show()
+        }
+    }
+
+    @objc private func showOnboarding() {
+        onboardingController.show()
     }
 
     private func installMenu() {

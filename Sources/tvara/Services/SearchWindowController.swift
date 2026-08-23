@@ -22,6 +22,10 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
+        // No window shadow: translucent glass in a rectangular window makes
+        // AppKit draw a hard-cornered shadow around the full window rect (a
+        // visible rectangular line while key), instead of following the
+        // rounded bubble. Same reason as the onboarding panel.
         panel.hasShadow = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -42,6 +46,11 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
         // for a frame before snapping into place.
         repositionForCurrentScreen()
         installKeyMonitor()
+        // ViewModel's open() pipeline calls this synchronously the moment
+        // a dismissable result is selected (keyboard OR mouse). Routes to
+        // hide() so the panel vanishes in the same frame as the action,
+        // before LaunchServices blocks on launching the target app.
+        viewModel.onDismiss = { [weak self] in self?.hide() }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -171,35 +180,43 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
                     self.viewModel.zoomSelectedCard()
                     return nil
                 }
-                // ⌘↩ on a selected result enters acting mode instead of
-                // opening it. Plain ↩ keeps the existing open-on-selected
-                // behavior so the launcher still works the old way.
-                if event.modifierFlags.contains(.command),
-                   self.viewModel.results.indices.contains(self.viewModel.selectedIndex) {
-                    let r = self.viewModel.results[self.viewModel.selectedIndex]
-                    // ⌘↩ on a collection row is meaningless (the row isn't
-                    // an openable target). Fall through silently — let the
-                    // user pick a thumb first with → before acting.
-                    if case .imagesCollection = r.openTarget {
-                        return nil
-                    }
-                    self.viewModel.beginActing(on: r)
-                    return nil
-                }
+                // ⌘↩ "act on this result" flow — TEMPORARILY DISABLED.
+                // The action-chaining feature (planner picks the next
+                // action from typed intent + selected result) is WIP and
+                // unstable; re-enabling will surface half-finished
+                // compose flows and partial planner output. Leaving the
+                // block in place — commented — so the wiring is one
+                // uncomment away when the feature is ready to ship.
+                // ────────────────────────────────────────────────────
+                // if event.modifierFlags.contains(.command),
+                //    self.viewModel.results.indices.contains(self.viewModel.selectedIndex) {
+                //     let r = self.viewModel.results[self.viewModel.selectedIndex]
+                //     // ⌘↩ on a collection row is meaningless (the row isn't
+                //     // an openable target). Fall through silently — let the
+                //     // user pick a thumb first with → before acting.
+                //     if case .imagesCollection = r.openTarget {
+                //         return nil
+                //     }
+                //     self.viewModel.beginActing(on: r)
+                //     return nil
+                // }
                 // Photo collection row: row-level ↩ zooms into Images;
-                // thumb-level ↩ opens the focused photo and dismisses.
+                // thumb-level ↩ opens the focused photo. Dismissal of
+                // the panel is now ViewModel-owned (via the onDismiss
+                // callback wired in init), so both paths can just call
+                // through without any local hide / dispatch dance.
                 if self.viewModel.results.indices.contains(self.viewModel.selectedIndex),
                    case .imagesCollection(let photos)
                         = self.viewModel.results[self.viewModel.selectedIndex].openTarget {
                     if let thumbIdx = self.viewModel.selectedThumbIndex,
                        photos.indices.contains(thumbIdx) {
-                        if self.viewModel.open(photos[thumbIdx]) { self.hide() }
+                        _ = self.viewModel.open(photos[thumbIdx])
                     } else {
                         self.viewModel.zoomToImagesFromCollection()
                     }
                     return nil
                 }
-                if self.viewModel.openSelected() { self.hide() }
+                _ = self.viewModel.openSelected()
                 return nil
             case kVK_LeftArrow:
                 // ← only does work on a collection row in the blended /

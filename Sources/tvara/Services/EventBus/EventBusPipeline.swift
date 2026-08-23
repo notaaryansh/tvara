@@ -11,9 +11,13 @@ import Foundation
 final class EventBusPipeline: @unchecked Sendable {
     let bus: EventBus
 
+    /// Single worker drains `message_added` for every messaging source —
+    /// the producer tags `events.source` (imessage / whatsapp / …) and
+    /// the worker dispatches into the matching per-source service.
     private let imsgProducer: IMessageProducer
-    private let imsgWorker: MessageIndexWorker
-    private let imsgRunner: WorkerRunner
+    private let whatsappProducer: WhatsAppProducer
+    private let messageWorker: MessageIndexWorker
+    private let messageRunner: WorkerRunner
 
     private let fileIndex: FileIndexService
     private let fileProducer: FileProducer
@@ -24,16 +28,45 @@ final class EventBusPipeline: @unchecked Sendable {
     private let imageWorker: ImageIndexWorker
     private let imageRunner: WorkerRunner
 
+    private let mailProducer: MailProducer
+    private let mailWorker: MailIndexWorker
+    private let mailRunner: WorkerRunner
+    private let mail: AppleMailService
+
+    private let discordProducer: DiscordProducer
+    private let discordWorker: DiscordIndexWorker
+    private let discordRunner: WorkerRunner
+    private let discord: DiscordService
+
+    private let ocrVocabWorker: OCRVocabBackfillWorker
+    private let ocrVocabRunner: WorkerRunner
+    private let images: ImageIndexService
+
     init(
         imessage: AppleMessagesService,
+        whatsapp: WhatsAppService,
+        mail: AppleMailService,
+        discord: DiscordService,
         images: ImageIndexService
     ) {
         let bus = EventBus()
         self.bus = bus
+        self.images = images
+        self.mail = mail
 
         self.imsgProducer = IMessageProducer(bus: bus, service: imessage)
-        self.imsgWorker = MessageIndexWorker(imessage: imessage)
-        self.imsgRunner = WorkerRunner(bus: bus, worker: imsgWorker)
+        self.whatsappProducer = WhatsAppProducer(bus: bus, service: whatsapp)
+        self.messageWorker = MessageIndexWorker(imessage: imessage, whatsapp: whatsapp)
+        self.messageRunner = WorkerRunner(bus: bus, worker: messageWorker)
+
+        self.mailProducer = MailProducer(bus: bus, mailBase: mail.mailBase)
+        self.mailWorker = MailIndexWorker(mail: mail)
+        self.mailRunner = WorkerRunner(bus: bus, worker: mailWorker)
+
+        self.discord = discord
+        self.discordProducer = DiscordProducer(bus: bus, cacheDir: discord.cacheDir)
+        self.discordWorker = DiscordIndexWorker(discord: discord)
+        self.discordRunner = WorkerRunner(bus: bus, worker: discordWorker)
 
         self.fileIndex = FileIndexService()
         self.fileProducer = FileProducer(
@@ -49,15 +82,42 @@ final class EventBusPipeline: @unchecked Sendable {
         )
         self.imageWorker = ImageIndexWorker(images: images)
         self.imageRunner = WorkerRunner(bus: bus, worker: imageWorker)
+
+        self.ocrVocabWorker = OCRVocabBackfillWorker(images: images)
+        self.ocrVocabRunner = WorkerRunner(bus: bus, worker: ocrVocabWorker)
     }
 
     func start() async {
         await imsgProducer.start()
-        await imsgRunner.start()
+        await whatsappProducer.start()
+        await messageRunner.start()
         await fileProducer.start()
         await fileRunner.start()
         await imageProducer.start()
         await imageRunner.start()
+        await mailProducer.start()
+        await mailRunner.start()
+        await discordProducer.start()
+        await discordRunner.start()
+        await ocrVocabRunner.start()
+        // Seed the spellfix1 vocab backfill into the queue. Cheap when
+        // the meta flag has already been flipped — early-returns inside
+        // the service — so safe to call on every launch.
+        Task.detached(priority: .utility) { [bus, images] in
+            await images.enqueueOCRVocabBackfillIfNeeded(bus: bus)
+        }
+        // Mail bootstrap: walk every .emlx into the mirror once per
+        // launch. Detached so it doesn't block the pipeline start;
+        // FSEvents picks up anything that arrives mid-walk and the
+        // dedupe key collapses overlap with bootstrap rows.
+        Task.detached(priority: .utility) { [mail] in
+            await mail.bootstrap()
+        }
+        // Discord bootstrap: one-shot full cache walk. Subsequent
+        // changes flow in through the FSEvents producer.
+        Task.detached(priority: .utility) { [discord] in
+            await discord.bootstrap()
+        }
 
         let depth = await bus.depthByStatus()
         let pending = depth["pending"] ?? 0

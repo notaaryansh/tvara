@@ -48,6 +48,11 @@ struct SearchResultRow: View {
                 .padding(.horizontal, 6)
         )
         .contentShape(Rectangle())
+        // Subtle visual treatment for fuzzy results so the user can
+        // tell at a glance that "Did you mean?" results are below the
+        // exact matches. Dimming the whole row by 25% reads as quieter
+        // chrome without breaking layout or icon legibility.
+        .opacity(result.isFuzzyMatch ? 0.7 : 1.0)
     }
 
     @ViewBuilder
@@ -128,12 +133,12 @@ struct SearchResultRow: View {
             } else if isMail {
                 messageAvatar(platformBadge: Self.mailBadgeIcon)
             } else if let data = result.iconData, let img = NSImage(data: data) {
-                // System Settings rows ship a real macOS app icon
-                // (gradient + symbol baked in). Render it full-bleed at
-                // 36x36 without the favicon bubble — adding the bubble
-                // around an already-finished app icon looks like an
-                // icon-inside-an-icon.
-                if result.source == .settings {
+                // Real macOS app icons (System Settings, Notion, Linear,
+                // …) ship a complete gradient + symbol — render them
+                // full-bleed at 36x36 without the favicon bubble.
+                // Wrapping an already-finished app icon in a chrome
+                // background looks like an icon-inside-an-icon.
+                if Self.fullBleedAppIconSources.contains(result.source) {
                     Image(nsImage: img)
                         .resizable()
                         .interpolation(.high)
@@ -162,6 +167,13 @@ struct SearchResultRow: View {
             }
         }
     }
+
+    /// Sources whose `iconData` is a real macOS app icon (full gradient +
+    /// symbol baked in) rather than a tiny favicon. The `.url` openTarget
+    /// renderer skips the favicon bubble for these so the icon sits flush
+    /// at 36×36 the way Apps + Settings rows do.
+    private static let fullBleedAppIconSources: Set<SearchResult.Source> =
+        [.settings, .notion, .linear]
 
     private static let discordBadgeIcon: NSImage =
         NSWorkspace.shared.icon(forFile: "/Applications/Discord.app")

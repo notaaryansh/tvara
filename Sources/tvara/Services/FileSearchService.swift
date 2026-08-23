@@ -48,34 +48,55 @@ actor FileSearchService {
         do {
             try process.run()
         } catch {
+            // Most likely EMFILE (too many open files). Surface it rather
+            // than failing silently — a slow drip of leaked fds used to
+            // take the whole Files tab down until the app was relaunched.
+            NSLog("[FileSearchService] mdfind failed to launch: \(error)")
             return []
         }
         currentProcess = process
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return await Task.detached(priority: .userInitiated) {
-            Self.consume(process: process, stdout: stdout,
-                         query: trimmed, scopePrefix: home, limit: limit)
-        }.value
+        return await Self.consume(process: process, stdout: stdout, stderr: stderr,
+                                  query: trimmed, scopePrefix: home, limit: limit)
     }
 
     nonisolated private static func consume(
-        process: Process, stdout: Pipe,
+        process: Process, stdout: Pipe, stderr: Pipe,
         query: String, scopePrefix: String, limit: Int
-    ) -> [SearchResult] {
+    ) async -> [SearchResult] {
         let queryLower = query.lowercased()
+
+        // Drain BOTH pipes concurrently on background threads.
+        // readDataToEndOfFile blocks until EOF (the process exits, or the
+        // actor's next query terminate()s it) and drains as bytes arrive —
+        // so a broad query emitting >64KB can't fill the pipe buffer and
+        // deadlock mdfind mid-write. The old code polled isRunning WITHOUT
+        // reading, so any such query stalled the full 1s cap and came back
+        // truncated. Draining stderr also stops its pipe fds from leaking.
+        async let stdoutData: Data = Task.detached(priority: .userInitiated) {
+            stdout.fileHandleForReading.readDataToEndOfFile()
+        }.value
+        async let stderrDrain: Void = Task.detached(priority: .utility) {
+            _ = stderr.fileHandleForReading.readDataToEndOfFile()
+        }.value
 
         // Hard cap so a pathological query can't stall the UI. Unscoped
         // mdfind normally returns in ~50ms so this is well above noise.
-        // Loop exits early if the actor's terminate() killed us — fine,
-        // we'll return whatever partial output reached the pipe.
-        let deadline = Date().addingTimeInterval(1.0)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.01)
+        // Terminating closes the pipe write ends → the drains above hit EOF.
+        let watchdog = Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if process.isRunning { process.terminate() }
         }
-        if process.isRunning { process.terminate() }
 
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        let data = await stdoutData
+        await stderrDrain
+        watchdog.cancel()
+
+        // Reap the exited/terminated subprocess so we don't leak a zombie
+        // (and its fds) for the entire lifetime of this long-lived actor.
+        await Task.detached(priority: .utility) { process.waitUntilExit() }.value
+
         guard let output = String(data: data, encoding: .utf8) else { return [] }
 
         let paths = output

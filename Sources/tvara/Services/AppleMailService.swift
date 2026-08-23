@@ -6,12 +6,12 @@ private let SQLITE_TRANSIENT_ML = unsafeBitCast(-1, to: sqlite3_destructor_type.
 actor AppleMailService {
     // MARK: - Configuration
 
-    private let mailBase: String
+    /// Exposed so `MailProducer` can wire an `FSEventsWatcher` against
+    /// the same directory tree this service indexes from.
+    nonisolated let mailBase: String
     private let indexDbPath: String
     private var db: OpaquePointer?
-    private var lastBuildCheck: Date?
-    private var buildTask: Task<Void, Never>?
-    private static let refreshLifetime: TimeInterval = 300   // re-scan at most every 5 min
+    private var bootstrapTask: Task<Void, Never>?
 
     init() {
         // Both paths can exist on a single Mac:
@@ -54,16 +54,56 @@ actor AppleMailService {
     }
 
     func warmCache() async {
-        await refreshIfNeeded()
+        // No-op now: the EventBus pipeline (MailProducer + MailIndexWorker)
+        // owns ingestion. Bootstrap is kicked separately from the pipeline
+        // start, not on first search, so we no longer block keystrokes
+        // behind a 5-minute walk of the mail tree.
     }
 
     func search(query: String, limit: Int = 30) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
-        guard FileManager.default.fileExists(atPath: mailBase) else { return [] }
-
-        await refreshIfNeeded()
         return queryFTS(query: trimmed, limit: limit)
+    }
+
+    /// One-shot first-launch bootstrap: walk every `.emlx` under
+    /// `mailBase`, parse, and write to the FTS5 mirror. Idempotent — the
+    /// `indexed_files` table makes repeat calls cheap (we only re-parse
+    /// paths whose mtime has changed). Subsequent deltas come through
+    /// the `MailProducer` → `MailIndexWorker` push path.
+    ///
+    /// Runs at most once per launch; safe to call from
+    /// `EventBusPipeline.start()` without serialising against the FSEvents
+    /// watcher (FSEvents kicks in immediately and any new files arriving
+    /// mid-bootstrap will dedupe-key collapse).
+    func bootstrap() async {
+        guard FileManager.default.fileExists(atPath: mailBase) else { return }
+        if let existing = bootstrapTask {
+            await existing.value
+            return
+        }
+        let task = Task { await self.runBootstrap() }
+        bootstrapTask = task
+        await task.value
+    }
+
+    /// Worker entry point. Decode + ingest a batch of `.emlx` files.
+    /// Throws on transient failures so the bus retries. `indexed_files`
+    /// makes redundant calls cheap.
+    func indexEmlxPaths(_ paths: [String]) async throws {
+        let unique = Array(Set(paths))
+        guard !unique.isEmpty else { return }
+
+        let alreadyIndexed = loadIndexedFiles()
+        let toParse = unique.filter { !alreadyIndexed.contains($0) }
+        guard !toParse.isEmpty else { return }
+
+        let parsed: [IndexedMailRow] = await Task.detached(priority: .utility) {
+            Self.parseEmlxFiles(paths: toParse)
+        }.value
+
+        guard !parsed.isEmpty else { return }
+        ingestFTS(parsed)
     }
 
     // MARK: - FTS5 query
@@ -211,28 +251,13 @@ actor AppleMailService {
         return db
     }
 
-    // MARK: - Refresh / build pipeline
+    // MARK: - Bootstrap pipeline (first launch only)
 
-    private func refreshIfNeeded() async {
-        if let t = lastBuildCheck, Date().timeIntervalSince(t) < Self.refreshLifetime {
-            return
-        }
-        if let existing = buildTask {
-            await existing.value
-            return
-        }
-        let task = Task { await self.runIncrementalBuild() }
-        buildTask = task
-        await task.value
-        buildTask = nil
-        lastBuildCheck = Date()
-    }
-
-    private func runIncrementalBuild() async {
+    private func runBootstrap() async {
         let alreadyIndexed = loadIndexedFiles()
         let mailBase = self.mailBase
 
-        let parsed: [IndexedMailRow] = await Task.detached(priority: .userInitiated) {
+        let parsed: [IndexedMailRow] = await Task.detached(priority: .utility) {
             Self.walkEmlxFiles(under: mailBase, skip: alreadyIndexed)
         }.value
 
@@ -300,7 +325,32 @@ actor AppleMailService {
         sqlite3_exec(db, "COMMIT", nil, nil, nil)
     }
 
-    // MARK: - .emlx walker (heavy; runs detached)
+    // MARK: - .emlx parsers (heavy; run detached)
+
+    /// Parse a specific set of `.emlx` paths. Used by the worker on
+    /// the FSEvents-driven hot path: paths come from the producer, not
+    /// from a tree walk.
+    nonisolated private static func parseEmlxFiles(paths: [String]) -> [IndexedMailRow] {
+        var out: [IndexedMailRow] = []
+        for path in paths {
+            let url = URL(fileURLWithPath: path)
+            let values = try? url.resourceValues(
+                forKeys: [.isRegularFileKey, .contentModificationDateKey]
+            )
+            guard values?.isRegularFile == true else { continue }
+            guard let parsed = EmlxParser.parse(fileURL: url) else { continue }
+            out.append(IndexedMailRow(
+                messageId: parsed.messageId,
+                subject:   parsed.subject,
+                from:      parsed.from,
+                body:      parsed.body,
+                date:      parsed.date,
+                path:      path,
+                mtime:     values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+            ))
+        }
+        return out
+    }
 
     nonisolated private static func walkEmlxFiles(
         under base: String, skip: Set<String>

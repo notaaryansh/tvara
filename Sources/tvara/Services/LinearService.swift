@@ -43,7 +43,7 @@ actor LinearService {
             badge: nil,
             openTarget: .url(url),
             rank: 700,
-            iconData: nil
+            iconData: SourceAppIcons.iconData(for: .linear)
         )]
     }
 

@@ -6,12 +6,12 @@ private let SQLITE_TRANSIENT_DC = unsafeBitCast(-1, to: sqlite3_destructor_type.
 actor DiscordService {
     // MARK: - Configuration
 
-    private let cacheDir: String
+    /// Exposed so `DiscordProducer` can wire an `FSEventsWatcher` against
+    /// the same directory tree this service indexes from.
+    nonisolated let cacheDir: String
     private let indexDbPath: String
-    private static let indexLifetime: TimeInterval = 60   // re-check cache dir at most this often
 
     private var db: OpaquePointer?
-    private var lastDirCheck: Date?
     private var buildTask: Task<Void, Never>?
 
     init() {
@@ -34,18 +34,40 @@ actor DiscordService {
     // MARK: - Public API
 
     func warmCache() async {
-        await refreshIfNeeded()
+        // No-op now: the EventBus pipeline (DiscordProducer +
+        // DiscordIndexWorker) owns ingestion. Bootstrap is kicked
+        // separately from pipeline start, not on first search.
     }
 
     func search(query: String, limit: Int = 30) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
-        guard FileManager.default.fileExists(atPath: cacheDir) else { return [] }
-
-        await refreshIfNeeded()
         let contacts = queryContacts(needle: trimmed)
         let messages = querySQL(needle: trimmed, limit: limit)
         return contacts + messages
+    }
+
+    /// One-shot first-launch bootstrap: walk the Chromium cache once,
+    /// parse every entry newer than `lastBuildTime`, populate the local
+    /// index. Idempotent — repeat calls cheap thanks to the watermark.
+    func bootstrap() async {
+        guard FileManager.default.fileExists(atPath: cacheDir) else { return }
+        await indexFromCache()
+    }
+
+    /// Worker entry point. Runs the incremental cache scan. Single
+    /// in-flight task; concurrent callers wait on the existing one
+    /// rather than duplicating work.
+    func indexFromCache() async {
+        guard FileManager.default.fileExists(atPath: cacheDir) else { return }
+        if let existing = buildTask {
+            await existing.value
+            return
+        }
+        let task = Task { await self.runIncrementalBuild() }
+        buildTask = task
+        await task.value
+        buildTask = nil
     }
 
     /// Find every message involving a contact by resolving their username
@@ -60,7 +82,6 @@ actor DiscordService {
         let trimmed = contactName.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
         guard FileManager.default.fileExists(atPath: cacheDir) else { return [] }
-        await refreshIfNeeded()
 
         let userIds = resolveUserIds(matching: trimmed)
         let contactCards = queryContacts(needle: trimmed)
@@ -78,7 +99,6 @@ actor DiscordService {
     /// realistic personal-account index.
     func allMessagesForRerank(limit: Int = 10_000) async -> [SearchResult] {
         guard FileManager.default.fileExists(atPath: cacheDir) else { return [] }
-        await refreshIfNeeded()
         let sql = """
             \(Self.messageSelectPrefix)
             ORDER BY m.timestamp DESC
@@ -192,24 +212,6 @@ actor DiscordService {
     }
 
     // MARK: - Index lifecycle
-
-    private func refreshIfNeeded() async {
-        // Avoid hammering the filesystem on every keystroke.
-        if let t = lastDirCheck, Date().timeIntervalSince(t) < Self.indexLifetime {
-            return
-        }
-        if let existing = buildTask {
-            await existing.value
-            return
-        }
-        let task = Task {
-            await self.runIncrementalBuild()
-        }
-        buildTask = task
-        await task.value
-        buildTask = nil
-        lastDirCheck = Date()
-    }
 
     private func runIncrementalBuild() async {
         let lastBuilt = readLastBuildTime() ?? .distantPast

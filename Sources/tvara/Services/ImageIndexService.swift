@@ -2,6 +2,7 @@ import Accelerate
 import AppKit
 import CoreImage
 import CoreML
+import CSQLiteSpellfix
 import Foundation
 import SQLite3
 import Vision
@@ -33,14 +34,38 @@ actor ImageIndexService {
     private let allowedExts: Set<String> = ["jpg","jpeg","png","heic","heif","tiff","tif","bmp","webp","gif"]
 
     /// Lazily-loaded CoreML encoders. Loading takes ~50-100ms, so we only
-    /// pay that cost the first time a search or index sweep runs.
+    /// pay that cost the first time a search or index sweep runs. Released
+    /// after `idleTimeout` of inactivity (or on memory pressure) so the
+    /// ~300 MB CoreML/MPSGraph state doesn't sit resident forever.
     private var clipImage: MLModel?
     private var clipText: MLModel?
     private var tokenizer: CLIPTokenizer?
 
+    /// Pending fire of `unloadModels()`. Reset on every `ensureModels()`
+    /// call (interactive search OR EventBus image worker), so live indexing
+    /// and backfill keep the model warm naturally.
+    private var idleUnloadTask: Task<Void, Never>?
+    private static let idleTimeout: TimeInterval = 300  // 5 min
+
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
+
     // Debounce so we don't rescan on every search.
     private var lastScan: Date = .distantPast
     private static let scanLifetime: TimeInterval = 600  // 10 min
+
+    // Floor for MobileCLIP-S2 cosine similarity below which a "match"
+    // is indistinguishable from noise. Anything beneath this gets
+    // excluded from the RRF rank lists so unrelated rows don't fill in
+    // the top-N when no signal really matches the query.
+    private static let minCLIPCosine: Float = 0.20
+
+    // Encoded thumbnail bytes keyed by `"<path>|<mtime>"`. Search() hits
+    // this before disk on every result row — generating a fresh JPEG
+    // from a CGImageSource per row was costing 7-8ms × 30 ≈ 230ms inside
+    // search(). LRU-ish: capped, drops oldest entries when full.
+    private var thumbCache: [String: Data] = [:]
+    private var thumbCacheOrder: [String] = []
+    private static let thumbCacheMax = 512
 
     init(scanRoots: [URL]? = nil) {
         let home = NSHomeDirectory()
@@ -62,6 +87,18 @@ actor ImageIndexService {
 
         var handle: OpaquePointer?
         if sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK {
+            // Statically-linked spellfix1 extension. Installs the
+            // `spellfix1` virtual-table module on this connection so
+            // `CREATE VIRTUAL TABLE … USING spellfix1` becomes legal
+            // below. Failing silently here would surface as a confusing
+            // "no such module: spellfix1" error in createSchema; log so
+            // the cause is visible.
+            if let h = handle {
+                let rc = csqlite_spellfix_install(UnsafeMutableRawPointer(h))
+                if rc != SQLITE_OK {
+                    NSLog("ImageIndexService: csqlite_spellfix_install failed rc=%d", rc)
+                }
+            }
             self.db = handle
             Self.createSchema(db: handle)
         }
@@ -134,6 +171,15 @@ actor ImageIndexService {
           INSERT INTO images_fts(rowid, ocr) VALUES (new.id, new.ocr);
         END;
 
+        -- spellfix1 vocabulary over OCR tokens. Each distinct token from
+        -- every image's OCR text gets inserted here once; on query we ask
+        -- spellfix1 for the K nearest neighbours of each typed token
+        -- (Damerau-Levenshtein + phonetic class hash). The `score` column
+        -- is 0 for an exact vocab hit and grows with edit distance, so
+        -- ranking exact-above-fuzzy comes free from sorting by score asc.
+        -- Backfilled from existing `images.ocr` rows by `migrateIfNeeded`.
+        CREATE VIRTUAL TABLE IF NOT EXISTS ocr_vocab USING spellfix1;
+
         -- One-time backfill / migration flags
         CREATE TABLE IF NOT EXISTS meta (
           key   TEXT PRIMARY KEY,
@@ -163,15 +209,64 @@ actor ImageIndexService {
     /// are reused verbatim. Tracked via the `meta` table so this only
     /// runs once per upgrade.
     private func migrateIfNeeded() async {
+        guard db != nil else { return }
+        // The OCR-vocab backfill is now queue-driven — see
+        // `enqueueOCRVocabBackfillIfNeeded(bus:)`, called from
+        // `EventBusPipeline.start()`. Only the labels+FTS migration runs
+        // synchronously here, since it's bounded by the existing
+        // `rrf_backfill_done` gate and doesn't share the spellfix
+        // shadow-table memory pressure that broke the in-process loop.
+        if metaValue("rrf_backfill_done") != "1" {
+            await backfillLabelsAndFTSIfNeeded()
+        }
+        purgeBundleInternalsIfNeeded()
+    }
+
+    /// One-shot DB cleanup for pre-fix installs: removes rows whose path
+    /// lives inside a macOS bundle directory (Photos library, .app, etc.).
+    /// Earlier versions of `enumerate` descended into these — the
+    /// derivatives' UUID filenames cluttered search results. Gated by a
+    /// meta flag so it only runs once per install.
+    private func purgeBundleInternalsIfNeeded() {
         guard let db else { return }
-        if metaValue("rrf_backfill_done") == "1" { return }
+        if metaValue("bundle_internals_purged_v1") == "1" { return }
+        let patterns = [
+            "%.photoslibrary/%",
+            "%.aplibrary/%",
+            "%.migratedaperturelibrary/%",
+            "%.migratediphotolibrary/%",
+            "%.app/%",
+            "%.framework/%",
+        ]
+        var totalDeleted = 0
+        for pattern in patterns {
+            var stmt: OpaquePointer?
+            let sql = "DELETE FROM images WHERE path LIKE ?"
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT_IMG)
+                if sqlite3_step(stmt) == SQLITE_DONE {
+                    totalDeleted += Int(sqlite3_changes(db))
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+        // FTS5 contentless mirror cascades via the trigger on `images`,
+        // and image_labels has ON DELETE CASCADE, so no extra cleanup
+        // here. The thumb cache is in-memory and refills naturally.
+        NSLog("ImageIndexService: purged %d bundle-internal rows", totalDeleted)
+        setMetaValue("bundle_internals_purged_v1", "1")
+    }
+
+    /// Original (pre-spellfix) one-time backfill: rebuild FTS5 + re-tag
+    /// label rows from cached `labels_json` for installs that predate
+    /// those tables. Idempotent — gated by `rrf_backfill_done`.
+    private func backfillLabelsAndFTSIfNeeded() async {
+        guard let db else { return }
         guard await ensureModels() else { return }
 
         NSLog("ImageIndexService: one-time backfill of labels + FTS5 for existing rows")
-        // FTS5 rebuild
         sqlite3_exec(db, "INSERT INTO images_fts(images_fts) VALUES('rebuild')", nil, nil, nil)
 
-        // Walk existing rows and re-tag from labels_json
         var stmt: OpaquePointer?
         let sql = "SELECT id, labels_json FROM images WHERE labels_json IS NOT NULL"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -200,6 +295,66 @@ actor ImageIndexService {
         setMetaValue("rrf_backfill_done", "1")
         loadLabelCache()
         NSLog("ImageIndexService: backfill complete")
+    }
+
+    /// One-time vocab-seeding pass, expressed as a queue producer instead
+    /// of a synchronous loop. For every image that has OCR text, enqueue
+    /// one `ocr_vocab_backfill` event keyed on the image ID; the worker
+    /// (see `OCRVocabBackfillWorker`) drains those in small batches so
+    /// spellfix1's in-memory shadow-table journal never balloons.
+    ///
+    /// Idempotency: the meta flag is flipped after enqueueing finishes,
+    /// so on a crash mid-enqueue the next launch re-runs and the unique
+    /// `dedupe_key` collapses already-queued rows. Workers themselves are
+    /// flag-agnostic — they just consume whatever's pending.
+    func enqueueOCRVocabBackfillIfNeeded(bus: EventBus) async {
+        guard let db else { return }
+        if metaValue("spellfix_vocab_backfill_done") == "1" { return }
+
+        var ids: [Int64] = []
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT id FROM images WHERE ocr IS NOT NULL AND length(ocr) > 0", -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                ids.append(sqlite3_column_int64(stmt, 0))
+            }
+        }
+        sqlite3_finalize(stmt)
+        guard !ids.isEmpty else {
+            setMetaValue("spellfix_vocab_backfill_done", "1")
+            return
+        }
+
+        NSLog("ImageIndexService: enqueueing ocr_vocab backfill for %d images", ids.count)
+        var enqueued = 0
+        for id in ids {
+            do {
+                _ = try await bus.enqueue(
+                    type: EventType.ocrVocabBackfill,
+                    source: EventSource.fs,
+                    payload: OCRVocabBackfillPayload(imageID: id),
+                    dedupeKey: "vocab_backfill:\(id)"
+                )
+                enqueued += 1
+            } catch {
+                NSLog("ImageIndexService: ocr_vocab enqueue failed for id=%lld: %@", id, "\(error)")
+            }
+        }
+        setMetaValue("spellfix_vocab_backfill_done", "1")
+        NSLog("ImageIndexService: ocr_vocab backfill enqueued (%d events)", enqueued)
+    }
+
+    /// Worker entry point. Pull this image's OCR text and feed its
+    /// distinct tokens into the spellfix1 vocab. Missing rows complete
+    /// cleanly — they were either deleted between enqueue and drain, or
+    /// updated to drop their OCR text. Neither is a retry-worthy error.
+    func indexOCRVocab(imageID: Int64) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT ocr FROM images WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        sqlite3_bind_int64(stmt, 1, imageID)
+        guard sqlite3_step(stmt) == SQLITE_ROW, let p = sqlite3_column_text(stmt, 0) else { return }
+        writeOCRVocab(String(cString: p))
     }
 
     private func metaValue(_ key: String) -> String? {
@@ -253,6 +408,17 @@ actor ImageIndexService {
             NSLog("ImageSearch: %@ %.1fms", name, (now - stage) * 1000)
             stage = now
         }
+        // Cooperative cancellation. The caller (SearchViewModel) cancels
+        // the outer Task on every new keystroke; we check at each phase
+        // boundary so the actor releases promptly for the next query
+        // instead of finishing 300-500ms of doomed work.
+        func cancelled() -> Bool {
+            if Task.isCancelled {
+                NSLog("ImageSearch: cancelled after %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+                return true
+            }
+            return false
+        }
         guard await ensureModels(),
               let qVec = encodeText(trimmed) else { return [] }
         mark("encodeText")
@@ -263,11 +429,7 @@ actor ImageIndexService {
         if labelCache.isEmpty { loadLabelCache() }
 
         // ─── Pull every image row's (id, path, ocr, embedding) once ────────
-        struct Row {
-            let id: Int64; let path: String; let ocr: String; let w: Int; let h: Int
-            let imgEmb: [Float]
-        }
-        var rows: [Int64: Row] = [:]
+        var rows: [Int64: ImageRow] = [:]
         var stmt: OpaquePointer?
         let sql = "SELECT id, path, ocr, embedding, width, height FROM images WHERE embedding IS NOT NULL"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -280,23 +442,33 @@ actor ImageIndexService {
                 let buf = UnsafeBufferPointer(start: blob.assumingMemoryBound(to: Float.self), count: 512)
                 let w = Int(sqlite3_column_int(stmt, 4))
                 let h = Int(sqlite3_column_int(stmt, 5))
-                rows[id] = Row(id: id, path: path, ocr: ocr, w: w, h: h, imgEmb: Array(buf))
+                rows[id] = ImageRow(id: id, path: path, ocr: ocr, w: w, h: h, imgEmb: Array(buf))
             }
         }
         sqlite3_finalize(stmt)
         mark("SELECT images (rows=\(rows.count))")
         if rows.isEmpty { return [] }
+        if cancelled() { return [] }
 
         // ─── Signal 1: image-CLIP cosine ───────────────────────────────────
+        // Drop sub-threshold cosines BEFORE handing positions to RRF.
+        // Without this floor, every image gets a rank — so when nothing
+        // really matches, RRF still picks 30 "best of the noise" rows
+        // and the result list looks random.
         var imgScores: [(Int64, Float)] = []
         imgScores.reserveCapacity(rows.count)
         for (id, r) in rows {
             var s: Float = 0
             vDSP_dotpr(qVec, 1, r.imgEmb, 1, &s, vDSP_Length(512))
-            imgScores.append((id, s))
+            if s >= Self.minCLIPCosine {
+                imgScores.append((id, s))
+            }
         }
         imgScores.sort { $0.1 > $1.1 }
-        mark("imgScores dotpr+sort")
+        // Cap to a top-K so RRF positions stay comparable to BM25's 200.
+        if imgScores.count > 200 { imgScores = Array(imgScores.prefix(200)) }
+        mark("imgScores dotpr+sort (kept=\(imgScores.count))")
+        if cancelled() { return [] }
 
         // ─── Signal 2: best-label cosine per image ─────────────────────────
         // First: cosine(query, every label) once.
@@ -324,8 +496,12 @@ actor ImageIndexService {
         }
         sqlite3_finalize(llStmt)
         mark("SELECT image_labels (pairs=\(bestLabelPerImage.count))")
-        let labelRanks = bestLabelPerImage
+        // Same floor + cap as imgScores: a 0.10-cosine "best label" is
+        // not a signal, just whatever happened to be the least-bad tag.
+        let labelRanks: [(Int64, Float)] = bestLabelPerImage
+            .filter { $0.value >= Self.minCLIPCosine }
             .sorted { $0.value > $1.value }
+            .prefix(200)
             .map { ($0.key, $0.value) }
 
         // ─── Signal 3: BM25 over OCR via FTS5 ──────────────────────────────
@@ -357,13 +533,25 @@ actor ImageIndexService {
 
         let fused = rrf.sorted { $0.value > $1.value }.prefix(limit)
         mark("RRF fusion")
+        if cancelled() { return [] }
 
-        let results: [SearchResult] = fused.compactMap { (imageID, fusedScore) -> SearchResult? in
+        // Build the metadata first (synchronous, actor-bound — reads DB
+        // for top labels). Thumbnails are deferred to a parallel pass
+        // below since CGImageSource thumbnailing dominated 230ms+ of
+        // each search() call when done sequentially.
+        struct Intermediate {
+            let imageID: Int64
+            let title: String
+            let subtitle: String
+            let badge: String
+            let rank: Int
+            let path: String
+        }
+        let intermediates: [Intermediate] = fused.compactMap { (imageID, fusedScore) in
             guard let r = rows[imageID] else { return nil }
             let imgC = imgCosine[imageID] ?? 0
             let labC = bestLabelPerImage[imageID] ?? 0
 
-            // Subtitle: OCR snippet wins if non-empty, then top labels.
             let snippet = r.ocr.trimmingCharacters(in: .whitespacesAndNewlines)
                               .replacingOccurrences(of: "\n", with: " ")
             let topLabels = topLabelNames(forImage: imageID).joined(separator: ", ")
@@ -372,30 +560,194 @@ actor ImageIndexService {
             else if !topLabels.isEmpty { subtitle = topLabels }
             else { subtitle = "\(r.w)×\(r.h)" }
 
-            // Rank encodes the fused score into a sortable Int so the
-            // cross-source merge in SearchViewModel keeps strong fused
-            // matches near the top of the unified results.
-            let rank = Int(fusedScore * 100_000)
+            return Intermediate(
+                imageID: imageID,
+                title: (r.path as NSString).lastPathComponent,
+                subtitle: subtitle,
+                badge: String(format: "%.2f", max(imgC, labC)),
+                rank: Int(fusedScore * 100_000),
+                path: r.path
+            )
+        }
+        mark("intermediates (n=\(intermediates.count))")
+        if cancelled() { return [] }
 
-            // Badge shows whichever signal won this image so the user has
-            // a quick intuition for "why did this match".
-            let badge = String(format: "%.2f", max(imgC, labC))
+        // Pull thumbnails in parallel. Cache hits skip the work entirely;
+        // misses fan out to detached tasks on the global pool, then we
+        // write the bytes back into the actor cache at the end.
+        let thumbs = await fetchThumbnails(paths: intermediates.map(\.path), maxDim: 256)
+        mark("thumbnails (n=\(thumbs.count))")
 
-            let iconData = makeThumbnail(path: r.path, maxDim: 256)
-            return SearchResult(
+        let results: [SearchResult] = intermediates.map { mid in
+            SearchResult(
+                title: mid.title,
+                subtitle: mid.subtitle,
+                source: .images,
+                date: nil,
+                badge: mid.badge,
+                openTarget: .file(mid.path),
+                rank: mid.rank,
+                iconData: thumbs[mid.path] ?? nil
+            )
+        }
+
+        // ─── Signal 4: fuzzy OCR via spellfix1 ────────────────────────────
+        // Catches both user typos ("tomijazz" → "tomljazz") AND OCR errors
+        // ("tomi jazz" mis-read as "tomljazz" by Vision). spellfix1 is an
+        // indexed Damerau-Levenshtein + phonetic-class lookup over the OCR
+        // vocabulary — much cheaper than running Levenshtein per-token at
+        // query time.
+        //
+        // Capped at 3 results per query, ranked in a band STRICTLY below
+        // anything the exact pipeline could produce, and dedup'd against
+        // the exact result set so a strong fuzzy candidate can't double-
+        // up on a row the exact pass already returned.
+        let exactIds: Set<Int64> = Set(results.compactMap { res -> Int64? in
+            // Recover the image id from the result set. fused.compactMap
+            // dropped ids the exact pipeline didn't surface; this set
+            // exists just to skip them in the fuzzy pass below.
+            guard case .file(let p) = res.openTarget else { return nil }
+            return rows.first(where: { $0.value.path == p })?.key
+        })
+        let fuzzyResults = fuzzyOCRSearch(
+            query: trimmed,
+            rows: rows,
+            excluding: exactIds
+        )
+        mark("fuzzy OCR (n=\(fuzzyResults.count))")
+
+        NSLog("ImageSearch: TOTAL %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+
+        // Filter out any row whose thumbnail generation failed — we don't
+        // want empty tiles in the photo strip, and there's no useful UI to
+        // show for an image we couldn't decode. `makeThumbnail` returns
+        // nil in four situations (file moved/deleted, HEIC with a bad
+        // color profile, screenshot PNGs with quirky metadata sections,
+        // TCC permission revoked). Silently dropping them here is the
+        // cheapest fix that removes the visible broken squares.
+        //
+        // TODO: proper retry + DLQ pipeline instead of silent drop.
+        // The right architecture is:
+        //   1. Enqueue failed paths onto the EventBus as an
+        //      `imageReindex(path:)` event.
+        //   2. ImageIndexWorker picks them up, re-runs the full
+        //      Vision + CLIP + thumbnail pipeline once more. Transient
+        //      failures (locked file mid-copy, momentary permission
+        //      flicker, ImageIO having a bad millisecond) self-heal.
+        //   3. If the re-index also fails: DELETE FROM images WHERE
+        //      path=? AND INSERT INTO image_quarantine(path, mtime,
+        //      quarantined_at). The quarantine table prevents the
+        //      backfill sweep from re-indexing the same broken file on
+        //      the next scan pass (which would thrash forever).
+        //   4. Backfill sweep JOINs against image_quarantine and skips
+        //      paths whose stored mtime matches the current mtime; a
+        //      user edit / replacement bumps the mtime and reopens the
+        //      file for another try.
+        // Estimated ~50 lines. Not doing it now because the silent-drop
+        // above is good enough for v0 UX and the DLQ work belongs in the
+        // same commit that touches the EventBus event schema.
+        let filtered = results.filter { $0.iconData != nil }
+        let filteredFuzzy = fuzzyResults.filter { $0.iconData != nil }
+        return filtered + filteredFuzzy
+    }
+
+    /// Run the fuzzy OCR pass. Expands every query token via spellfix1 to
+    /// get its K nearest vocab neighbours, then BM25s the OR-joined
+    /// expansion against `images_fts`. Returns up to 3 results, ranked in
+    /// `[100, 900]` so they never out-rank the exact pipeline.
+    private func fuzzyOCRSearch(
+        query: String,
+        rows: [Int64: ImageRow],
+        excluding exactIds: Set<Int64>
+    ) -> [SearchResult] {
+        guard let db else { return [] }
+        let queryTokens = Self.vocabTokens(from: query)
+        guard !queryTokens.isEmpty else { return [] }
+
+        // 1. spellfix1 expansion. Per token, fetch K nearest vocab words
+        //    with `score > 0` (exact-vocab hits are already covered by
+        //    the regular BM25 pass — we only need the fuzzy tail).
+        var expanded: Set<String> = []
+        for token in queryTokens {
+            let candidates = spellfixCandidates(for: token, top: 5)
+            for cand in candidates where cand != token {
+                expanded.insert(cand)
+            }
+        }
+        guard !expanded.isEmpty else { return [] }
+
+        // 2. BM25 over the expansion. FTS5 OR-joins are token-level, so a
+        //    single MATCH string with all candidates returns one ranked
+        //    list. Limit to a small top-N — we only emit 3 anyway, so
+        //    pulling more would be wasted reads.
+        let fts = expanded.joined(separator: " OR ")
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = "SELECT rowid, bm25(images_fts) FROM images_fts WHERE images_fts MATCH ? ORDER BY bm25(images_fts) LIMIT 30"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_text(stmt, 1, fts, -1, SQLITE_TRANSIENT_IMG)
+
+        var hits: [(Int64, Float)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            if exactIds.contains(id) { continue }
+            // FTS5 BM25 is signed-negative; flip so larger == better.
+            let score = Float(-sqlite3_column_double(stmt, 1))
+            hits.append((id, score))
+        }
+
+        // 3. Pick top 3, emit with a low rank band (100, 600, 900) so
+        //    fuzzy stays structurally below any exact result. Tiers are
+        //    spread out so the visual ordering reads cleanly even when
+        //    BM25 differences are small.
+        let top = Array(hits.prefix(3))
+        var out: [SearchResult] = []
+        let fuzzyRankTiers = [900, 600, 300]
+        for (idx, (imageID, _)) in top.enumerated() {
+            guard let r = rows[imageID] else { continue }
+            let snippet = r.ocr.trimmingCharacters(in: .whitespacesAndNewlines)
+                              .replacingOccurrences(of: "\n", with: " ")
+            let topLabels = topLabelNames(forImage: imageID).joined(separator: ", ")
+            let subtitle: String
+            if !snippet.isEmpty { subtitle = String(snippet.prefix(120)) }
+            else if !topLabels.isEmpty { subtitle = topLabels }
+            else { subtitle = "\(r.w)×\(r.h)" }
+            let iconData = thumbnailFromCacheOrLoad(path: r.path, maxDim: 256)
+            out.append(SearchResult(
                 title: (r.path as NSString).lastPathComponent,
                 subtitle: subtitle,
                 source: .images,
                 date: nil,
-                badge: badge,
+                badge: "~",
                 openTarget: .file(r.path),
-                rank: rank,
-                iconData: iconData
-            )
+                rank: fuzzyRankTiers[idx],
+                iconData: iconData,
+                isFuzzyMatch: true
+            ))
         }
-        mark("results+thumbnails (n=\(results.count))")
-        NSLog("ImageSearch: TOTAL %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        return results
+        return out
+    }
+
+    /// Ask spellfix1 for the top-K vocab words nearest to `token`. Returns
+    /// the words including any exact vocab hit; the caller filters that out
+    /// because the regular BM25 pass already covers exact-token matches.
+    private func spellfixCandidates(for token: String, top: Int) -> [String] {
+        guard let db else { return [] }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        // `top=K` is spellfix1's hidden column for "limit results to K
+        // nearest neighbours". Distinct from SQL LIMIT.
+        let sql = "SELECT word FROM ocr_vocab WHERE word MATCH ? AND top=?"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_text(stmt, 1, token, -1, SQLITE_TRANSIENT_IMG)
+        sqlite3_bind_int(stmt, 2, Int32(top))
+        var out: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let p = sqlite3_column_text(stmt, 0) {
+                out.append(String(cString: p))
+            }
+        }
+        return out
     }
 
     /// Top 3 label names for an image, ordered by stored confidence desc.
@@ -437,8 +789,14 @@ actor ImageIndexService {
     // MARK: - Model loading
 
     /// True if both CoreML models loaded successfully. Cached after first call.
+    /// Every call resets the idle-unload timer so any active workload
+    /// (search burst, EventBus indexing batch, backfill sweep) keeps the
+    /// model warm until `idleTimeout` after the last use.
     private func ensureModels() async -> Bool {
-        if clipImage != nil && clipText != nil && tokenizer != nil { return true }
+        if clipImage != nil && clipText != nil && tokenizer != nil {
+            scheduleIdleUnload()
+            return true
+        }
         guard let imgURL = Bundle.module.url(forResource: "mobileclip_s2_image", withExtension: "mlmodelc", subdirectory: "Models"),
               let txtURL = Bundle.module.url(forResource: "mobileclip_s2_text",  withExtension: "mlmodelc", subdirectory: "Models")
         else {
@@ -456,11 +814,59 @@ actor ImageIndexService {
             self.clipImage = try MLModel(contentsOf: imgURL, configuration: cfg)
             self.clipText  = try MLModel(contentsOf: txtURL, configuration: cfg)
             self.tokenizer = CLIPTokenizer()
+            scheduleIdleUnload()
             return true
         } catch {
             NSLog("ImageIndexService: failed to load CoreML models: \(error)")
             return false
         }
+    }
+
+    /// (Re)arm the deferred unload. Each call cancels the previous pending
+    /// fire, so a steady stream of usage keeps the timer perpetually pushed
+    /// out into the future.
+    private func scheduleIdleUnload() {
+        idleUnloadTask?.cancel()
+        idleUnloadTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.idleTimeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.unloadModels(reason: "idle")
+        }
+    }
+
+    /// Release the CoreML models + tokenizer. The next call into
+    /// `ensureModels()` (interactive search, FSEvents-driven indexing,
+    /// backfill) reloads them — typically 50-100ms. Safe to call repeatedly.
+    private func unloadModels(reason: String) {
+        guard clipImage != nil || clipText != nil || tokenizer != nil else { return }
+        clipImage = nil
+        clipText  = nil
+        tokenizer = nil
+        idleUnloadTask?.cancel()
+        idleUnloadTask = nil
+        NSLog("ImageIndexService: unloaded CLIP models (\(reason))")
+    }
+
+    /// Subscribe to system memory-pressure notifications. On `.warning` or
+    /// `.critical` we drop the CLIP models immediately rather than waiting
+    /// for the idle timer — the kernel is already asking everyone to give
+    /// back what they can.
+    nonisolated func startMemoryPressureMonitoring() {
+        Task { await self.installMemoryPressureSource() }
+    }
+
+    private func installMemoryPressureSource() {
+        guard memoryPressureSource == nil else { return }
+        let src = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: .global(qos: .utility)
+        )
+        src.setEventHandler { [weak self] in
+            guard let self else { return }
+            Task { await self.unloadModels(reason: "memory pressure") }
+        }
+        src.resume()
+        memoryPressureSource = src
     }
 
     // MARK: - Indexing
@@ -495,11 +901,22 @@ actor ImageIndexService {
     private func enumerate(roots: [URL]) -> [URL] {
         var out: [URL] = []
         let fm = FileManager.default
+        // Prefetch isPackage so the enumerator returns it without a
+        // separate stat per URL. Bundles (.photoslibrary, .app,
+        // .framework, …) get descended into by default — we explicitly
+        // skip them: their internal storage is UUID-named derivatives,
+        // not user-meaningful images.
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isPackageKey]
         for root in roots {
             guard let enumr = fm.enumerator(at: root,
-                                            includingPropertiesForKeys: [.isRegularFileKey],
+                                            includingPropertiesForKeys: keys,
                                             options: [.skipsHiddenFiles]) else { continue }
             for case let f as URL in enumr {
+                let vals = try? f.resourceValues(forKeys: Set(keys))
+                if vals?.isPackage == true {
+                    enumr.skipDescendants()
+                    continue
+                }
                 if allowedExts.contains(f.pathExtension.lowercased()) {
                     out.append(f)
                 }
@@ -591,6 +1008,53 @@ actor ImageIndexService {
 
         guard imageID > 0 else { return }
         writeImageLabels(imageID: imageID, labels: labels)
+        // Feed every distinct OCR token into spellfix1's learned vocab.
+        // Cheap per-call (a handful of tokens, sqlite3_step apiece) and
+        // makes the fuzzy-OCR search path work for new images without
+        // a re-backfill.
+        writeOCRVocab(ocr)
+        // Re-indexed file's pixels may have changed — drop any cached
+        // thumbnail so the next search re-renders fresh bytes.
+        if thumbCache.removeValue(forKey: path) != nil {
+            thumbCacheOrder.removeAll(where: { $0 == path })
+        }
+    }
+
+    /// Tokenise OCR text and insert into the spellfix1 vocabulary table.
+    /// Duplicate words are handled internally by spellfix1 (it bumps the
+    /// word's rank column instead of inserting a second row).
+    private func writeOCRVocab(_ text: String) {
+        guard let db, !text.isEmpty else { return }
+        let tokens = Self.vocabTokens(from: text)
+        guard !tokens.isEmpty else { return }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(
+            db, "INSERT INTO ocr_vocab(word) VALUES (?)",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return }
+        for token in tokens {
+            sqlite3_bind_text(stmt, 1, token, -1, SQLITE_TRANSIENT_IMG)
+            sqlite3_step(stmt)
+            sqlite3_reset(stmt)
+        }
+    }
+
+    /// Split a string into the distinct alphanumeric tokens we feed into
+    /// `ocr_vocab`. 3-char minimum — single letters and 2-char digrams
+    /// blow up the vocabulary without improving fuzzy recall (their
+    /// neighbours are too many to be useful).
+    nonisolated static func vocabTokens(from text: String) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for slice in text.lowercased().split(
+            whereSeparator: { !$0.isLetter && !$0.isNumber }
+        ) {
+            let s = String(slice)
+            guard s.count >= 3 else { continue }
+            if seen.insert(s).inserted { out.append(s) }
+        }
+        return out
     }
 
     /// Wipe and rewrite the image→label many-to-many rows, looking up (and
@@ -811,7 +1275,66 @@ actor ImageIndexService {
         return buf
     }
 
-    private func makeThumbnail(path: String, maxDim: Int) -> Data? {
+    /// Cache-aware single-path thumbnail (used by the fuzzy path where
+    /// we only need 3 — not worth a TaskGroup). Reads/writes the actor
+    /// cache so the next call for the same path is free.
+    private func thumbnailFromCacheOrLoad(path: String, maxDim: Int) -> Data? {
+        if let cached = thumbCache[path] { return cached }
+        guard let data = Self.makeThumbnail(path: path, maxDim: maxDim) else { return nil }
+        cacheStoreThumb(path: path, data: data)
+        return data
+    }
+
+    /// Parallel thumbnail fetch. Splits `paths` into cache hits (returned
+    /// synchronously) and misses (fanned out across a TaskGroup so all
+    /// 30-ish JPEG encodes happen on the global pool concurrently rather
+    /// than serially on the actor). Returns `[path: Data?]`.
+    private func fetchThumbnails(paths: [String], maxDim: Int) async -> [String: Data?] {
+        var out: [String: Data?] = [:]
+        var misses: [String] = []
+        for p in paths {
+            if let cached = thumbCache[p] {
+                out[p] = cached
+            } else {
+                misses.append(p)
+            }
+        }
+        guard !misses.isEmpty else { return out }
+
+        let loaded: [(String, Data?)] = await withTaskGroup(of: (String, Data?).self) { group in
+            for p in misses {
+                group.addTask {
+                    (p, Self.makeThumbnail(path: p, maxDim: maxDim))
+                }
+            }
+            var collected: [(String, Data?)] = []
+            for await pair in group { collected.append(pair) }
+            return collected
+        }
+        for (p, data) in loaded {
+            out[p] = data
+            if let data { cacheStoreThumb(path: p, data: data) }
+        }
+        return out
+    }
+
+    /// Insert into the thumbnail cache with simple FIFO eviction once
+    /// the cap is hit. Not strictly LRU — paths re-touched by a repeat
+    /// search don't bubble up — but the cap is large enough (512) that
+    /// the difference doesn't matter for our scan sizes.
+    private func cacheStoreThumb(path: String, data: Data) {
+        if thumbCache[path] != nil { return }
+        thumbCache[path] = data
+        thumbCacheOrder.append(path)
+        while thumbCacheOrder.count > Self.thumbCacheMax {
+            let evict = thumbCacheOrder.removeFirst()
+            thumbCache.removeValue(forKey: evict)
+        }
+    }
+
+    /// Nonisolated so it can be invoked from a Task without re-entering
+    /// the actor — search() fans out 30 of these in parallel.
+    nonisolated private static func makeThumbnail(path: String, maxDim: Int) -> Data? {
         let url = URL(fileURLWithPath: path)
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let opts: NSDictionary = [
@@ -835,4 +1358,16 @@ actor ImageIndexService {
 struct LabelHit: Codable {
     let name: String
     let confidence: Float
+}
+
+/// One image's data as pulled in the search-time bulk SELECT. File-private
+/// to the file so both `search()` and `fuzzyOCRSearch` can pass it around
+/// without re-fetching from sqlite.
+fileprivate struct ImageRow {
+    let id: Int64
+    let path: String
+    let ocr: String
+    let w: Int
+    let h: Int
+    let imgEmb: [Float]
 }
