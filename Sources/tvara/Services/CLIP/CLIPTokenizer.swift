@@ -57,7 +57,7 @@ class CLIPTokenizer {
 
     init() {
 
-        let url = Bundle.module.url(forResource: "clip-merges", withExtension: "txt", subdirectory: "Models")!
+        let url = Bundle.tvaraResources.url(forResource: "clip-merges", withExtension: "txt", subdirectory: "Models")!
 
         let bpeMergesTxt = try! String(contentsOf: url)
         let arr = bpeMergesTxt.split(separator: "\n").map { String($0) }
@@ -70,7 +70,7 @@ class CLIPTokenizer {
         self.bpeRanks = bpeRanks
 
         self.encoder = {
-            let url = Bundle.module.url(forResource: "clip-vocab", withExtension: "json", subdirectory: "Models")!
+            let url = Bundle.tvaraResources.url(forResource: "clip-vocab", withExtension: "json", subdirectory: "Models")!
             let json = try! Data(contentsOf: url)
             let decoder = JSONDecoder()
             let vocab = try! decoder.decode([String: Int].self, from: json)

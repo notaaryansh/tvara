@@ -797,8 +797,8 @@ actor ImageIndexService {
             scheduleIdleUnload()
             return true
         }
-        guard let imgURL = Bundle.module.url(forResource: "mobileclip_s2_image", withExtension: "mlmodelc", subdirectory: "Models"),
-              let txtURL = Bundle.module.url(forResource: "mobileclip_s2_text",  withExtension: "mlmodelc", subdirectory: "Models")
+        guard let imgURL = Bundle.tvaraResources.url(forResource: "mobileclip_s2_image", withExtension: "mlmodelc", subdirectory: "Models"),
+              let txtURL = Bundle.tvaraResources.url(forResource: "mobileclip_s2_text",  withExtension: "mlmodelc", subdirectory: "Models")
         else {
             NSLog("ImageIndexService: MobileCLIP models not found in bundle")
             return false

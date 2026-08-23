@@ -31,7 +31,7 @@ cp "${ROOT}/Info.plist" "${CONTENTS}/Info.plist"
 BIN_DIR="$(swift build -c "${BUILD_CONFIG}" --show-bin-path)"
 for b in "${BIN_DIR}"/*.bundle; do
     if [[ -d "$b" ]]; then
-        cp -R "$b" "${MACOS_DIR}/"
+        cp -R "$b" "${RESOURCES_DIR}/"
     fi
 done
 
@@ -57,7 +57,7 @@ SIGNING_IDENTITY="${SIGNING_IDENTITY:-4F64A755DFB135BE69E1995968180971D2FC13BC}"
 # Bundle.url(forResource:subdirectory:) still finds files under Resources/
 # at runtime because Foundation auto-detects the layout. Then we sign
 # each nested bundle, and finally the outer app.
-for nested in "${MACOS_DIR}"/*.bundle; do
+for nested in "${RESOURCES_DIR}"/*.bundle; do
     [[ -d "$nested" ]] || continue
     # Skip if already restructured (idempotent rebuilds).
     if [[ -f "${nested}/Contents/Info.plist" ]]; then
