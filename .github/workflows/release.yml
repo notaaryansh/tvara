@@ -17,9 +17,12 @@ permissions:
 
 jobs:
   release:
-    # macos-14 ships Xcode 15.x and Apple Silicon runners — required for
-    # `--arch arm64` builds and for notarytool.
-    runs-on: macos-14
+    # macos-26 ships Xcode 26 (macOS 26 SDK) on Apple Silicon — required
+    # for the Liquid Glass APIs in GlassSurface.swift (Glass, glassEffect,
+    # GlassEffectContainer, glassEffectID), which only exist in the macOS 26
+    # SDK even though they're runtime-gated behind @available(macOS 26.0, *).
+    # Also gives `--arch arm64` builds and notarytool.
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
