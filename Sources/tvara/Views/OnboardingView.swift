@@ -465,6 +465,14 @@ struct OnboardingView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task {
+            // Reflect already-granted permissions when the step opens, so the
+            // pills read "Granted" without re-prompting. Never fires a dialog.
+            for id in ["accessibility", "contacts", "automation", "fulldisk"] {
+                guard let permission = PermissionsBootstrap.Permission(rawValue: id) else { continue }
+                permissionGranted[id] = PermissionsBootstrap.currentlyGranted(permission)
+            }
+        }
     }
 
     private func permissionRow(id: String, symbol: String, name: String, why: String) -> some View {
@@ -487,8 +495,15 @@ struct OnboardingView: View {
             Spacer()
 
             Button {
-                withAnimation(.snappy(duration: 0.24, extraBounce: 0.15)) {
-                    permissionGranted[id] = !granted
+                // Fire the real system prompt for this row. The pill reflects
+                // the actual granted state that comes back (Accessibility may
+                // stay "Grant" until the user flips the toggle in Settings).
+                guard let permission = PermissionsBootstrap.Permission(rawValue: id) else { return }
+                Task {
+                    let isGranted = await PermissionsBootstrap.request(permission)
+                    withAnimation(.snappy(duration: 0.24, extraBounce: 0.15)) {
+                        permissionGranted[id] = isGranted
+                    }
                 }
             } label: {
                 grantPillLabel(granted: granted)

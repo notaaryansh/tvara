@@ -25,12 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // FIRST thing: request every permission we need so all the system
-        // dialogs land in one batch at launch — instead of surprising the
-        // user mid-flow (e.g. iMessage failing to send because Automation
-        // was never granted). Accessibility specifically MUST be requested
-        // this way because macOS won't auto-prompt for it.
-        PermissionsBootstrap.requestAll()
+        // Permissions are NOT requested here anymore. Firing every TCC dialog
+        // at launch ambushed the user with a stack of prompts before they'd
+        // seen any UI. Each permission is now requested from the onboarding
+        // "Permissions" step, when the user taps "Grant" on its row (see
+        // PermissionsBootstrap.request + OnboardingView). The ⌘K hotkey uses
+        // Carbon RegisterEventHotKey, which needs no Accessibility grant, so
+        // onboarding is reachable before anything is granted.
 
         // Build the window service ONCE and share between the view model
         // (it owns the captured PID + match/execute) and the overlay
