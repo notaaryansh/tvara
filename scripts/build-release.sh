@@ -67,11 +67,16 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${BINARY}" "${MACOS_DIR}/${APP_NAME}"
 cp "${ROOT}/Info.plist" "${CONTENTS}/Info.plist"
 
-# Copy SPM-generated resource bundles (CLIP tokenizer + MobileCLIP models).
-# Bundle.module looks for *.bundle next to the executable.
+# Copy SPM-generated resource bundles (CLIP tokenizer + MobileCLIP models)
+# into Contents/Resources. Inside a .app, Bundle.module resolves *.bundle
+# through Bundle.main.resourceURL (== Contents/Resources) and the app root —
+# NOT Contents/MacOS. In a raw `swift build` layout the bundle sits next to
+# the executable, but replicating that inside the .app puts it somewhere
+# Bundle.module never searches, so it fatalErrors on launch
+# ("could not load resource bundle") the instant the app starts.
 for b in "${BIN_DIR}"/*.bundle; do
     [[ -d "$b" ]] || continue
-    cp -R "$b" "${MACOS_DIR}/"
+    cp -R "$b" "${RESOURCES_DIR}/"
 done
 
 # ---- 3. Restructure SPM resource bundles for codesign ----
@@ -87,7 +92,7 @@ done
 # individually with hardened runtime + entitlements before we seal the
 # outer app. (build-app.sh does the same thing for dev builds; missing it
 # from release builds was a latent bug.)
-for nested in "${MACOS_DIR}"/*.bundle; do
+for nested in "${RESOURCES_DIR}"/*.bundle; do
     [[ -d "$nested" ]] || continue
     if [[ -f "${nested}/Contents/Info.plist" ]]; then
         continue
@@ -122,7 +127,7 @@ done
 # --deep on the parent then verifies their hashes against the parent's
 # CodeResources file.
 echo "==> codesign nested resource bundles"
-for nested in "${MACOS_DIR}"/*.bundle; do
+for nested in "${RESOURCES_DIR}"/*.bundle; do
     [[ -d "$nested" ]] || continue
     codesign --force --options runtime --timestamp \
         --entitlements "${ENTITLEMENTS}" \
