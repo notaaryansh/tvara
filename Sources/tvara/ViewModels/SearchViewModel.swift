@@ -313,47 +313,74 @@ final class SearchViewModel: ObservableObject {
             .sink { [weak self] q in self?.performSearch(q) }
             .store(in: &cancellables)
 
-        // Fire every TCC-gated service up front so macOS shows all the
-        // permission prompts on launch #1 instead of staggering them across
-        // launches as the user first searches each source.
-        // App index — once it's built, re-run the active query so any apps
-        // that should have matched (but couldn't because the cache was
-        // cold) appear without the user having to retype. Cheap: this
-        // only triggers on the very first launch / after a 5-min refresh.
-        Task { [appService, weak self] in
-            await appService.warmCache()
-            guard let self = self else { return }
-            let q = self.query.trimmingCharacters(in: .whitespaces)
-            guard !q.isEmpty, self.appResults.isEmpty else { return }
-            self.appResults = appService.match(query: q)
+        // NOTE: data-source services are intentionally NOT started here.
+        // Most of them touch TCC-protected resources (Contacts, Full Disk,
+        // Photos, Automation) and macOS prompts the instant they do — which
+        // is why every permission dialog used to appear at launch. They're
+        // kicked off by startDataServices(), called once the user has been
+        // through the onboarding Permissions step, so nothing prompts before
+        // the user has explicitly granted it there.
+    }
+
+    /// Services already kicked off. Lets startDataServices() be called again
+    /// after the user grants a permission (from Settings) without restarting
+    /// the ones already running.
+    private var startedServices: Set<String> = []
+
+    /// Start data-source services. Called after onboarding is dismissed and
+    /// again whenever a permission is granted from Settings.
+    ///
+    /// The golden rule: this NEVER triggers a permission prompt. Services that
+    /// touch a TCC-protected resource only start when their permission is
+    /// *already* granted (a silent `currentlyGranted` check). Everything else
+    /// stays dormant until the user grants access from the Settings window,
+    /// which re-invokes this method. So nothing — not launch, not Skip, not
+    /// Finish — ever dumps a stack of system dialogs on the user.
+    func startDataServices() {
+        // Always safe — these touch no TCC-protected resource.
+        startOnce("app") { [appService, weak self] in
+            Task {
+                await appService.warmCache()
+                guard let self else { return }
+                let q = self.query.trimmingCharacters(in: .whitespaces)
+                guard !q.isEmpty, self.appResults.isEmpty else { return }
+                self.appResults = appService.match(query: q)
+            }
         }
-        Task { [discordService] in await discordService.warmCache() }
-        Task { [clipboardService] in await clipboardService.start() }
-        Task { [whatsappService] in await whatsappService.warmCache() }
-        Task { [imessageService] in await imessageService.warmCache() }
-        // Push-based ingestion pipeline. Held as `eventBusPipeline` so its
-        // producers + FSEvents watchers stay alive past this setup block.
-        Task { [eventBusPipeline] in await eventBusPipeline.start() }
-        Task { [mailService] in await mailService.warmCache() }
-        Task { [smartService] in await smartService.warmCache() }
-        Task { [fileService] in await fileService.warmCache() }
-        Task { [notesService] in await notesService.warmCache() }
-        Task { [notionService] in await notionService.warmCache() }
-        // Forces the lazy static-let icns→TIFF→PNG transcode off the
-        // main thread before the first keystroke can trip it. Measured
-        // 483 ms on a cold "blu" → Bluetooth match without this.
-        Task { [settingsService] in await settingsService.warmCache() }
-        // MobileCLIP-S2 image index — warms the CoreML models and triggers
-        // an incremental sweep of ~/Pictures, ~/Desktop, ~/Downloads.
-        Task.detached { [imageService] in await imageService.warmCache() }
-        // Calendar (EventKit) — used by Create Event in compose.
-        Task { await CalendarEventSaver.warmAccess() }
-        // Automation (Apple Events) → Messages.app — used by real iMessage
-        // send. Runs on a detached task because AEDeterminePermission may
-        // block until the user dismisses the TCC dialog.
-        Task.detached { IMessageSender.warmAccess() }
-        // Automation → Spotify.app — used by playlist shuffle-play.
-        Task.detached { SpotifyPlayer.warmAccess() }
+        startOnce("discord")  { [discordService]  in Task { await discordService.warmCache() } }
+        startOnce("clipboard"){ [clipboardService] in Task { await clipboardService.start() } }
+        startOnce("smart")    { [smartService]    in Task { await smartService.warmCache() } }
+        startOnce("notion")   { [notionService]   in Task { await notionService.warmCache() } }
+        // Forces the lazy static-let icns→TIFF→PNG transcode off the main
+        // thread before the first keystroke can trip it. No TCC involved.
+        startOnce("settings") { [settingsService] in Task { await settingsService.warmCache() } }
+
+        // Contacts-gated: iMessage resolves names → phone/email.
+        if PermissionsBootstrap.currentlyGranted(.contacts) {
+            startOnce("imessage") { [imessageService] in Task { await imessageService.warmCache() } }
+        }
+        // Full-Disk-gated: Mail / WhatsApp / Notes indexes + the FSEvents
+        // ingestion pipeline + image (Photos/folders) all read protected files.
+        if PermissionsBootstrap.currentlyGranted(.fulldisk) {
+            startOnce("mail")     { [mailService]     in Task { await mailService.warmCache() } }
+            startOnce("whatsapp") { [whatsappService] in Task { await whatsappService.warmCache() } }
+            startOnce("notes")    { [notesService]    in Task { await notesService.warmCache() } }
+            startOnce("file")     { [fileService]     in Task { await fileService.warmCache() } }
+            startOnce("image")    { [imageService]    in Task.detached { await imageService.warmCache() } }
+            startOnce("eventbus") { [eventBusPipeline] in Task { await eventBusPipeline.start() } }
+        }
+        // Automation-gated: Calendar create + iMessage/Spotify AppleScript.
+        if PermissionsBootstrap.currentlyGranted(.automation) {
+            startOnce("calendar")     { Task { await CalendarEventSaver.warmAccess() } }
+            startOnce("imessageSend") { Task.detached { IMessageSender.warmAccess() } }
+            startOnce("spotify")      { Task.detached { SpotifyPlayer.warmAccess() } }
+        }
+    }
+
+    private func startOnce(_ key: String, _ start: () -> Void) {
+        guard !startedServices.contains(key) else { return }
+        startedServices.insert(key)
+        start()
     }
 
     // MARK: - Window-management target

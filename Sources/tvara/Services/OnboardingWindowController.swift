@@ -33,7 +33,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         // rectangular line that only appears while the panel is key. Grounding
         // via a window shadow needs a padded transparent window; not worth it.
         panel.hasShadow = false
-        panel.level = .floating
+        panel.level = .normal
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isMovableByWindowBackground = true
         panel.titleVisibility = .hidden
