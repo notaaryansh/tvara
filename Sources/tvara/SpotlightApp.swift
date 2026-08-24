@@ -80,33 +80,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installStatusItem()
     }
 
-    /// Persistent menu bar presence. Left-click opens the search panel
-    /// (same as ⌘K); right-click shows a menu with Open + Quit so the app
-    /// can be fully terminated without going through `killall`.
+    /// Persistent menu-bar presence. Clicking the "t" drops a menu — the user
+    /// chooses Open / Settings / Quit from there. (⌘K still opens search
+    /// directly without touching the menu.)
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = item.button {
-            button.image = Self.makeMenuBarIcon()
-            button.target = self
-            button.action = #selector(statusItemClicked(_:))
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        }
+        item.button?.image = Self.makeMenuBarIcon()
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Open tvara",
-                     action: #selector(openSearch),
-                     keyEquivalent: "k")
-        menu.items.last?.keyEquivalentModifierMask = [.command]
+        let open = menu.addItem(withTitle: "Open tvara",
+                                action: #selector(openSearch), keyEquivalent: "k")
+        open.keyEquivalentModifierMask = [.command]
+        menu.addItem(withTitle: "Settings…",
+                     action: #selector(openSettings), keyEquivalent: ",")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Clear search history",
+                     action: #selector(clearSearchHistory), keyEquivalent: "")
+        #if DEBUG
+        menu.addItem(withTitle: "Show onboarding (dev)",
+                     action: #selector(showOnboarding), keyEquivalent: "")
+        #endif
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Quit tvara",
-                     action: #selector(NSApplication.terminate(_:)),
-                     keyEquivalent: "q")
-        // Attach via menu property only on demand so left-click can do its
-        // own thing — we set/clear it inside statusItemClicked.
-        item.menu = nil
+                     action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        // Assigning the menu makes a click (left or right) drop it automatically.
+        item.menu = menu
         self.statusItem = item
-        // Stash the menu on the item via associated object pattern would be
-        // overkill; instead build it again in the handler. It's cheap.
     }
 
     /// Menu-bar icon: the tvara "t" in Georgia bold-italic (matching the app
@@ -134,42 +134,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         image.isTemplate = true   // macOS tints to the menu bar (white on dark)
         image.accessibilityDescription = "tvara"
         return image
-    }
-
-    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
-        let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp {
-            showStatusMenu()
-        } else {
-            windowController.toggle()
-        }
-    }
-
-    private func showStatusMenu() {
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Open tvara  ⌘K",
-                     action: #selector(openSearch),
-                     keyEquivalent: "")
-        menu.addItem(withTitle: "Settings…",
-                     action: #selector(openSettings),
-                     keyEquivalent: ",")
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Clear search history",
-                     action: #selector(clearSearchHistory),
-                     keyEquivalent: "")
-        #if DEBUG
-        menu.addItem(withTitle: "Show onboarding (dev)",
-                     action: #selector(showOnboarding),
-                     keyEquivalent: "")
-        #endif
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Quit tvara",
-                     action: #selector(NSApplication.terminate(_:)),
-                     keyEquivalent: "q")
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        // Detach so the next plain click opens the panel instead of the menu.
-        statusItem.menu = nil
     }
 
     @objc private func clearSearchHistory() {
