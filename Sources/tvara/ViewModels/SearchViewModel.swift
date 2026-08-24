@@ -726,6 +726,21 @@ final class SearchViewModel: ObservableObject {
     /// The function returns immediately after spawning the tasks; the
     /// per-source Tasks each call `finishSection(_:)` on completion which
     /// flips `isLoading` to false once the last section finishes.
+    /// Whether a content source may be queried from search without triggering
+    /// a system permission prompt. The Full-Disk-gated sources read protected
+    /// data (Messages/Mail/Notes DBs, the Photos-adjacent image index); until
+    /// the user grants access from onboarding/Settings we don't touch them.
+    /// Everything else — files (mdfind against the Spotlight index), Discord
+    /// (local IPC), clipboard — needs no permission and never prompts.
+    private func permits(_ kind: BlendedSection.Kind) -> Bool {
+        switch kind {
+        case .whatsapp, .imessage, .mail, .notes, .images:
+            return PermissionsBootstrap.currentlyGranted(.fulldisk)
+        default:
+            return true
+        }
+    }
+
     private func runKeywordSearch(query: String, searchID: Int) async {
         // loadingSections was populated synchronously in search() so the
         // skeleton renders the instant the user finishes typing — no need
@@ -760,6 +775,13 @@ final class SearchViewModel: ObservableObject {
             (.clipboard, self.clipboardService),
         ]
         for (kind, source) in contentSources {
+            // Never query a TCC-protected source from search — that pops a
+            // system permission prompt. Skip it (clearing its section) until
+            // the user grants access from onboarding/Settings.
+            guard permits(kind) else {
+                assignSection(kind, searchID: searchID, results: [])
+                continue
+            }
             Task.detached { [weak self] in
                 let r = await source.search(query: query, limit: 30)
                 let history = await historyStore.lookup(r.compactMap(\.stableId))
@@ -795,10 +817,14 @@ final class SearchViewModel: ObservableObject {
         // actor checks Task.isCancelled between phases and returns []
         // early, so a fast typer doesn't queue searches behind each
         // other on the serial actor.
-        inflightImageTask = Task.detached { [weak self] in
-            let r = await imageService.search(query)
-            if Task.isCancelled { return }
-            await self?.assignSection(.images, searchID: searchID, results: r)
+        if permits(.images) {
+            inflightImageTask = Task.detached { [weak self] in
+                let r = await imageService.search(query)
+                if Task.isCancelled { return }
+                await self?.assignSection(.images, searchID: searchID, results: r)
+            }
+        } else {
+            assignSection(.images, searchID: searchID, results: [])
         }
 
         // Exclusivity check — also off main until the final flag write.

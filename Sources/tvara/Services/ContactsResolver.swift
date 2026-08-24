@@ -17,8 +17,6 @@ struct ResolvedContact: Sendable {
 /// instant — CNContactStore caches its own access decision.
 actor ContactsResolver {
     private let store = CNContactStore()
-    private var accessDecided = false
-    private var accessGranted = false
 
     private static let keys: [CNKeyDescriptor] = [
         CNContactGivenNameKey,
@@ -34,7 +32,7 @@ actor ContactsResolver {
     /// the other permission prompts rather than as a surprise on first
     /// search.
     func warmCache() async {
-        _ = await ensureAccess()
+        _ = ensureAccess()
     }
 
     /// Substring name lookup. Returns at most `limit` matches, ordered by
@@ -42,7 +40,7 @@ actor ContactsResolver {
     func search(name: String, limit: Int = 5) async -> [ResolvedContact] {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
-        guard await ensureAccess() else { return [] }
+        guard ensureAccess() else { return [] }
 
         let predicate = CNContact.predicateForContacts(matchingName: trimmed)
         let contacts: [CNContact]
@@ -66,22 +64,11 @@ actor ContactsResolver {
         }
     }
 
-    private func ensureAccess() async -> Bool {
-        if accessDecided { return accessGranted }
-        let status = CNContactStore.authorizationStatus(for: .contacts)
-        if status == .authorized {
-            accessDecided = true; accessGranted = true; return true
-        }
-        if status == .denied || status == .restricted {
-            accessDecided = true; accessGranted = false; return false
-        }
-        let granted: Bool = await withCheckedContinuation { cont in
-            store.requestAccess(for: .contacts) { ok, _ in
-                cont.resume(returning: ok)
-            }
-        }
-        accessDecided = true
-        accessGranted = granted
-        return granted
+    /// Use Contacts ONLY if it's already authorized. Never calls
+    /// `requestAccess` — that would pop the system prompt mid-search, which is
+    /// exactly what we don't want. The Contacts prompt is fired only from the
+    /// onboarding/Settings "Grant" button (PermissionsBootstrap.request).
+    private func ensureAccess() -> Bool {
+        CNContactStore.authorizationStatus(for: .contacts) == .authorized
     }
 }
