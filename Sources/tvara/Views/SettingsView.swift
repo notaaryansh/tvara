@@ -17,8 +17,10 @@ struct SettingsView: View {
     @State private var tab: Tab = .shortcut
     @Namespace private var tabNS
 
-    private let panelWidth: CGFloat = 620
-    private let panelHeight: CGFloat = 460
+    // Sized to the taller (Permissions) tab so switching tabs never changes
+    // the window size. Must match SettingsWindowController's panel rect.
+    private let panelWidth: CGFloat = 600
+    private let panelHeight: CGFloat = 548
 
     var body: some View {
         ZStack(alignment: .topTrailing) {

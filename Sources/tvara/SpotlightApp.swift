@@ -34,6 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Carbon RegisterEventHotKey, which needs no Accessibility grant, so
         // onboarding is reachable before anything is granted.
 
+        // Use the tvara "t" icon anywhere the app's icon is shown at runtime —
+        // permission dialogs, NSAlerts (e.g. PermissionsBootstrap's "needs
+        // access" popup), the About panel. The bundle already carries
+        // AppIcon.icns; this makes sure the in-process icon matches it too.
+        if let icon = NSImage(named: "AppIcon") {
+            NSApp.applicationIconImage = icon
+        }
+
         // Build the window service ONCE and share between the view model
         // (it owns the captured PID + match/execute) and the overlay
         // controller (it reads previewRect from the same captured PID).
@@ -78,11 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = NSImage(
-                systemSymbolName: "magnifyingglass",
-                accessibilityDescription: "tvara"
-            )
-            button.image?.isTemplate = true
+            button.image = Self.makeMenuBarIcon()
             button.target = self
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -103,6 +107,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = item
         // Stash the menu on the item via associated object pattern would be
         // overkill; instead build it again in the handler. It's cheap.
+    }
+
+    /// Menu-bar icon: the tvara "t" in Georgia bold-italic (matching the app
+    /// icon's Fraunces-style serif). Rendered as a TEMPLATE image, so macOS
+    /// tints it to match the menu bar — white on a dark bar, black on a light
+    /// one — instead of being locked to one colour. (Template images key off
+    /// the glyph's alpha, so the fill colour here is only a mask.)
+    private static func makeMenuBarIcon() -> NSImage {
+        let font = NSFont(name: "Georgia-BoldItalic", size: 16)
+            ?? NSFont.systemFont(ofSize: 16, weight: .bold)
+        let str = NSAttributedString(string: "t", attributes: [
+            .font: font,
+            .foregroundColor: NSColor.black,
+        ])
+        let textSize = str.size()
+        let size = NSSize(width: ceil(textSize.width) + 4, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let origin = NSPoint(
+                x: (rect.width - textSize.width) / 2,
+                y: (rect.height - textSize.height) / 2
+            )
+            str.draw(at: origin)
+            return true
+        }
+        image.isTemplate = true   // macOS tints to the menu bar (white on dark)
+        image.accessibilityDescription = "tvara"
+        return image
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {

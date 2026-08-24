@@ -13,8 +13,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     init(onPermissionsChanged: @escaping () -> Void) {
         let panel = SettingsPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 470),
-            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 548),
+            styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )

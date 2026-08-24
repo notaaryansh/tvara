@@ -27,6 +27,12 @@ struct PermissionsSection: View {
             for: NSApplication.didBecomeActiveNotification)) { _ in
             refresh()
         }
+        // Poll while the view is visible so a grant made in System Settings (or
+        // via the system prompt) flips the pill within ~1.5s — the Settings
+        // panel is non-activating, so we can't rely on focus events alone.
+        .onReceive(Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()) { _ in
+            refresh()
+        }
     }
 
     private func row(_ permission: PermissionsBootstrap.Permission) -> some View {
@@ -54,26 +60,29 @@ struct PermissionsSection: View {
         .glassSurface(cornerRadius: 10, fallbackFill: 0.03, fallbackStroke: 0.08)
     }
 
-    /// Granted → solid white affirmative pill. Ungranted → interactive glass.
+    /// Granted → green affirmative pill with a check. Ungranted → interactive
+    /// glass "Grant".
     @ViewBuilder
     private func pill(granted: Bool) -> some View {
-        let content = HStack(spacing: 6) {
-            if granted {
-                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
-            }
-            Text(granted ? "Granted" : "Grant")
-                .font(.system(size: 11, weight: .medium))
-        }
-        .foregroundColor(granted ? .black.opacity(0.85) : .white.opacity(0.85))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-
         if granted {
-            content
-                .background(Capsule().fill(Color.white.opacity(0.92)))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
+            HStack(spacing: 5) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .bold))
+                Text("Granted")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color(red: 0.22, green: 0.65, blue: 0.40)))
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
         } else {
-            content.glassCapsule(fallbackFill: 0.04, fallbackStroke: 0.22)
+            Text("Grant")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white.opacity(0.85))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .glassCapsule(fallbackFill: 0.04, fallbackStroke: 0.22)
         }
     }
 
