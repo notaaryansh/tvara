@@ -179,3 +179,81 @@ enum PermissionsBootstrap {
         NSLog("[perms] Automation → %@: %@", label, outcome)
     }
 }
+
+// MARK: - Display + System Settings deep-links
+
+extension PermissionsBootstrap.Permission {
+    /// Row title in the onboarding + Settings UIs.
+    var title: String {
+        switch self {
+        case .accessibility: return "Accessibility"
+        case .contacts:      return "Contacts"
+        case .automation:    return "Automation"
+        case .fulldisk:      return "Full Disk Access"
+        }
+    }
+
+    /// One-line rationale shown under the title.
+    var rationale: String {
+        switch self {
+        case .accessibility: return "Global hotkey and text injection"
+        case .contacts:      return "Look up people by name for iMessage & email"
+        case .automation:    return "Send iMessages and create calendar events"
+        case .fulldisk:      return "Index Mail, Notes and files beyond your Downloads"
+        }
+    }
+
+    /// SF Symbol for the row.
+    var symbol: String {
+        switch self {
+        case .accessibility: return "hand.tap"
+        case .contacts:      return "person.crop.circle"
+        case .automation:    return "app.connected.to.app.below.fill"
+        case .fulldisk:      return "internaldrive"
+        }
+    }
+
+    /// Deep-link to the exact System Settings › Privacy & Security pane so the
+    /// user lands on the right toggle instead of hunting for it.
+    var systemSettingsURL: URL? {
+        let base = "x-apple.systempreferences:com.apple.preference.security?"
+        let anchor: String
+        switch self {
+        case .accessibility: anchor = "Privacy_Accessibility"
+        case .contacts:      anchor = "Privacy_Contacts"
+        case .automation:    anchor = "Privacy_Automation"
+        case .fulldisk:      anchor = "Privacy_AllFiles"
+        }
+        return URL(string: base + anchor)
+    }
+}
+
+extension PermissionsBootstrap {
+    /// All permissions, in the order they appear in the UI.
+    static let allPermissions: [Permission] = [.accessibility, .contacts, .automation, .fulldisk]
+
+    /// Open System Settings on the pane for `permission`.
+    @MainActor
+    static func openSystemSettings(for permission: Permission) {
+        if let url = permission.systemSettingsURL {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Modal "tvara needs access" alert with a button that jumps straight to
+    /// the right System Settings pane. Use from feature code when an action
+    /// needs a permission the user hasn't granted.
+    @MainActor
+    static func presentAccessNeeded(for permission: Permission) {
+        let alert = NSAlert()
+        alert.messageText = "tvara needs \(permission.title) access"
+        alert.informativeText = permission.rationale + "."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Not Now")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            openSystemSettings(for: permission)
+        }
+    }
+}

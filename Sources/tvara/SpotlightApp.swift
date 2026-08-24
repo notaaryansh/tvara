@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayController: WindowSnapOverlayController!
     private var statusItem: NSStatusItem!
     private var onboardingController: OnboardingWindowController!
+    private var settingsController: SettingsWindowController!
 
     /// Session-only flag while the onboarding is still a mock. Every
     /// launch, the first ⌘K opens the onboarding panel; Skip / Finish
@@ -48,6 +49,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingController = OnboardingWindowController()
         onboardingController.onDismiss = { [weak self] in
             self?.hasSeenOnboarding = true
+            // Start whatever data services are ALREADY permitted. Nothing here
+            // prompts — startDataServices only warms sources whose permission
+            // is already granted (see SearchViewModel.startDataServices).
+            self?.viewModel.startDataServices()
+        }
+
+        // Settings window. Granting a permission here re-runs startDataServices
+        // so the newly-allowed source starts without a relaunch.
+        settingsController = SettingsWindowController { [weak self] in
+            self?.viewModel.startDataServices()
         }
 
         HotKeyManager.shared.register(
@@ -108,13 +119,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Open tvara  ⌘K",
                      action: #selector(openSearch),
                      keyEquivalent: "")
+        menu.addItem(withTitle: "Settings…",
+                     action: #selector(openSettings),
+                     keyEquivalent: ",")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Clear search history",
                      action: #selector(clearSearchHistory),
                      keyEquivalent: "")
+        #if DEBUG
         menu.addItem(withTitle: "Show onboarding (dev)",
                      action: #selector(showOnboarding),
                      keyEquivalent: "")
+        #endif
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Quit tvara",
                      action: #selector(NSApplication.terminate(_:)),
@@ -131,6 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSearch() {
         windowController.toggle()
+    }
+
+    @objc private func openSettings() {
+        settingsController.show()
     }
 
     private func handleHotkey() {
