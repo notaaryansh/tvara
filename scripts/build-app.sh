@@ -25,6 +25,7 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
 cp "${BINARY}" "${MACOS_DIR}/${APP_NAME}"
 cp "${ROOT}/Info.plist" "${CONTENTS}/Info.plist"
+cp "${ROOT}/Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
 
 # Copy SPM-generated resource bundles (CLIP tokenizer + MobileCLIP models).
 # Bundle.module looks for *.bundle next to the executable.

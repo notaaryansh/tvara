@@ -1,0 +1,20 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="tvara">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a3325"/>
+      <stop offset="1" stop-color="#682318"/>
+    </linearGradient>
+    <linearGradient id="hl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="clip"><rect width="512" height="512" rx="112" ry="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <rect width="512" height="512" fill="url(#hl)"/>
+    <text x="252" y="412" font-family="Georgia,'Times New Roman',serif" font-style="italic" font-weight="700" font-size="440" text-anchor="middle" fill="#4a160d" fill-opacity="0.5">t</text>
+    <text x="252" y="405" font-family="Georgia,'Times New Roman',serif" font-style="italic" font-weight="700" font-size="440" text-anchor="middle" fill="#f5f1e8">t</text>
+  </g>
+  <rect x="1.5" y="1.5" width="509" height="509" rx="110.5" ry="110.5" fill="none" stroke="#000000" stroke-opacity="0.12"/>
+</svg>

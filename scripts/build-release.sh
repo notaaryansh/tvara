@@ -66,6 +66,8 @@ rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${BINARY}" "${MACOS_DIR}/${APP_NAME}"
 cp "${ROOT}/Info.plist" "${CONTENTS}/Info.plist"
+# App icon (CFBundleIconFile = AppIcon). Finder / the DMG show this.
+cp "${ROOT}/Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
 
 # Copy SPM-generated resource bundles (CLIP tokenizer + MobileCLIP models)
 # into Contents/Resources. Inside a .app, Bundle.module resolves *.bundle
