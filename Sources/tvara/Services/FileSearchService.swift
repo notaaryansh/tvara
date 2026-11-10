@@ -170,12 +170,17 @@ actor FileSearchService {
         )
     }
 
-    nonisolated private static func formatSize(_ bytes: Int64) -> String? {
-        guard bytes > 0 else { return nil }
+    /// Built once; this runs for every file row on every keystroke.
+    nonisolated(unsafe) private static let sizeFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
         f.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
         f.countStyle = .file
-        return f.string(fromByteCount: bytes)
+        return f
+    }()
+
+    nonisolated private static func formatSize(_ bytes: Int64) -> String? {
+        guard bytes > 0 else { return nil }
+        return sizeFormatter.string(fromByteCount: bytes)
     }
 
     nonisolated private static func abbreviateHome(_ path: String) -> String {

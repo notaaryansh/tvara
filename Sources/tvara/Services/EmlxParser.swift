@@ -352,17 +352,19 @@ struct EmlxParser {
 
     // MARK: - RFC 2047 encoded-word decode
 
+    /// Matches `=?charset?encoding?text?=`. Compiled once — this runs for
+    /// the subject + from header of every message during mail indexing.
+    private static let mimeWordRegex = try? NSRegularExpression(
+        pattern: #"=\?([^?]+)\?([BbQq])\?([^?]*)\?="#
+    )
+
     /// Decode strings like `=?UTF-8?B?8J+Xkw==?=` or `=?utf-8?Q?Seed=20deals?=`
     /// into their visible form. Multiple encoded words and surrounding plain
     /// text are handled. Used for subject and from headers.
     private static func decodeMimeWords(_ s: String) -> String {
         guard s.contains("=?") else { return s }
 
-        // Match =?charset?encoding?text?=
-        let pattern = #"=\?([^?]+)\?([BbQq])\?([^?]*)\?="#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return s
-        }
+        guard let regex = mimeWordRegex else { return s }
         let ns = s as NSString
         let fullRange = NSRange(location: 0, length: ns.length)
         let matches = regex.matches(in: s, range: fullRange)
