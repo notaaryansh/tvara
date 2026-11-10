@@ -35,13 +35,13 @@
     <key>NSDownloadsFolderUsageDescription</key>
     <string>tvara searches your Downloads so you can find files by name.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>tvara uses AppleScript to send iMessages from the compose panel.</string>
+    <string>tvara sends the iMessages you write in it and plays what you pick in Spotify.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
-    <string>tvara creates calendar events from the compose panel.</string>
+    <string>tvara adds the events you create in it to your calendar.</string>
     <key>NSCalendarsUsageDescription</key>
-    <string>tvara creates calendar events from the compose panel.</string>
+    <string>tvara adds the events you create in it to your calendar.</string>
     <key>NSContactsUsageDescription</key>
-    <string>tvara looks up phone numbers and emails so it can show iMessage chat shortcuts for people in your address book.</string>
+    <string>tvara uses your contacts so you can find and message people by name.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key>

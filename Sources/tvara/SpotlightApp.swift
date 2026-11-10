@@ -11,11 +11,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingController: OnboardingWindowController!
     private var settingsController: SettingsWindowController!
 
-    /// Session-only flag while the onboarding is still a mock. Every
-    /// launch, the first ⌘K opens the onboarding panel; Skip / Finish
-    /// flips this so subsequent presses open the real search panel.
-    /// Swap for `@UserDefaults` once the flow is wired up for real.
-    private var hasSeenOnboarding: Bool = false
+    /// Persisted once the user finishes (or dev-skips) onboarding. Until
+    /// then the shortcut and the menu-bar "Open tvara" item both lead to
+    /// the onboarding panel; afterwards they open search.
+    private static let onboardingDoneKey = "hasCompletedOnboarding"
+    private var hasSeenOnboarding: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.onboardingDoneKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.onboardingDoneKey) }
+    }
+    private var openMenuItem: NSMenuItem?
 
     static func main() {
         let app = NSApplication.shared
@@ -55,12 +59,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         onboardingController = OnboardingWindowController()
-        onboardingController.onDismiss = { [weak self] in
-            self?.hasSeenOnboarding = true
+        onboardingController.onDismiss = { [weak self] openSearch in
+            guard let self else { return }
+            self.hasSeenOnboarding = true
             // Start whatever data services are ALREADY permitted. Nothing here
             // prompts — startDataServices only warms sources whose permission
             // is already granted (see SearchViewModel.startDataServices).
-            self?.viewModel.startDataServices()
+            self.viewModel.startDataServices()
+            // "Open tvara" on the last step does what it says.
+            if openSearch { self.windowController.toggle() }
         }
 
         // Settings window. Granting a permission here re-runs startDataServices
@@ -69,15 +76,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.viewModel.startDataServices()
         }
 
-        HotKeyManager.shared.register(
-            keyCode: UInt32(kVK_ANSI_K),
-            modifiers: UInt32(cmdKey)
-        ) { [weak self] in
+        // Registers the user's saved shortcut (⌘K until they pick another).
+        HotKeyManager.shared.start { [weak self] in
             self?.handleHotkey()
+        }
+        NotificationCenter.default.addObserver(
+            forName: HotKeyManager.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncOpenMenuItemShortcut() }
         }
 
         installMenu()
         installStatusItem()
+
+        if hasSeenOnboarding {
+            // Returning user: sources start at launch. This used to wait for
+            // onboarding to be dismissed, which happened again every launch.
+            viewModel.startDataServices()
+        } else {
+            // First launch: tvara has no Dock icon and no window, so show
+            // onboarding right away instead of waiting for a shortcut the
+            // user hasn't been told about yet.
+            onboardingController.show()
+        }
     }
 
     /// Persistent menu-bar presence. Clicking the "t" drops a menu — the user
@@ -89,8 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         let open = menu.addItem(withTitle: "Open tvara",
-                                action: #selector(openSearch), keyEquivalent: "k")
-        open.keyEquivalentModifierMask = [.command]
+                                action: #selector(openSearch), keyEquivalent: "")
+        openMenuItem = open
+        syncOpenMenuItemShortcut()
         menu.addItem(withTitle: "Settings…",
                      action: #selector(openSettings), keyEquivalent: ",")
         menu.addItem(NSMenuItem.separator())
@@ -140,8 +162,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.clearSelectionHistory()
     }
 
+    /// Show the user's real shortcut next to "Open tvara". Menu key
+    /// equivalents are single characters, so shortcuts on keys without one
+    /// (F-keys, arrows…) simply show no hint.
+    private func syncOpenMenuItemShortcut() {
+        guard let item = openMenuItem else { return }
+        let hotkey = HotKeyManager.shared.current
+        let label = hotkey.keyLabel
+        let key: String
+        switch label {
+        case "Space": key = " "
+        case "↩":     key = "\r"
+        case "⇥":     key = "\t"
+        default:      key = label.count == 1 ? label.lowercased() : ""
+        }
+        item.keyEquivalent = key
+        item.keyEquivalentModifierMask = key.isEmpty ? [] : hotkey.cocoaModifiers
+    }
+
+    /// Same route as the shortcut, so the menu can't bypass onboarding and
+    /// land in a search panel whose sources were never started.
     @objc private func openSearch() {
-        windowController.toggle()
+        handleHotkey()
     }
 
     @objc private func openSettings() {

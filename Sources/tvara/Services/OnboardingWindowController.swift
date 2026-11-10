@@ -6,17 +6,19 @@ final class OnboardingPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
-/// Mock onboarding window. Same visual grammar as the search panel
+/// First-run onboarding window. Same visual grammar as the search panel
 /// (Living Glass direction): borderless, non-activating, vibrancy blur
 /// behind a rounded rect. Unlike the search panel, does NOT hide on
 /// resign key — the user may click into System Settings during real
 /// permission grants and we don't want the panel disappearing on them.
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
-    /// Called when the user finishes onboarding, either via Skip or the
-    /// final "Start using tvara" button. Caller flips a session flag so
-    /// subsequent hotkey presses open the search panel instead.
-    var onDismiss: (() -> Void)?
+    /// Called when the user leaves onboarding. `openSearch` is true when
+    /// they finished via the last step's "Open tvara" button (so the caller
+    /// should drop them straight into search) and false for the dev Skip.
+    var onDismiss: ((_ openSearch: Bool) -> Void)?
+
+    private var hosting: NSHostingView<OnboardingView>!
 
     init() {
         let panel = OnboardingPanel(
@@ -40,15 +42,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         panel.titlebarAppearsTransparent = true
         panel.hidesOnDeactivate = false
         panel.animationBehavior = .none
+        // The whole surface is designed as white-on-dark glass. Without
+        // this, a Mac in Light mode gets light glass under white text.
+        panel.appearance = NSAppearance(named: .darkAqua)
 
         super.init(window: panel)
         panel.delegate = self
 
-        let root = OnboardingView(
-            onSkip: { [weak self] in self?.finish() },
-            onFinish: { [weak self] in self?.finish() }
-        )
-        let hosting = NSHostingView(rootView: root)
+        hosting = NSHostingView(rootView: makeRoot())
         hosting.translatesAutoresizingMaskIntoConstraints = false
         panel.contentView = hosting
 
@@ -57,8 +58,24 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    private func makeRoot() -> OnboardingView {
+        OnboardingView(
+            onSkip: { [weak self] in self?.finish(openSearch: false) },
+            onFinish: { [weak self] in self?.finish(openSearch: true) }
+        )
+    }
+
     func show() {
         guard let window else { return }
+        // Already up (e.g. the shortcut was pressed mid-onboarding): just
+        // bring it forward, don't lose the user's place.
+        if window.isVisible {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        // Fresh presentation always starts at the first step.
+        hosting.rootView = makeRoot()
         repositionForCurrentScreen()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -68,9 +85,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window?.orderOut(nil)
     }
 
-    private func finish() {
+    private func finish(openSearch: Bool) {
         hide()
-        onDismiss?()
+        onDismiss?(openSearch)
     }
 
     private func repositionForCurrentScreen() {
