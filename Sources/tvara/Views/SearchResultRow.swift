@@ -63,7 +63,7 @@ struct SearchResultRow: View {
             // iconData at index time.
             if result.source == .images,
                let data = result.iconData,
-               let img = NSImage(data: data) {
+               let img = RowRendering.image(from: data) {
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.high)
@@ -76,7 +76,7 @@ struct SearchResultRow: View {
                     )
             } else if result.source == .app,
                       let data = result.iconData,
-                      let img = NSImage(data: data) {
+                      let img = RowRendering.image(from: data) {
                 // App source: render the pre-decoded PNG that
                 // AppIconStore baked at warm time. Bypasses
                 // FileIconView/IconCache's lazy `.icns` decode so the
@@ -132,7 +132,7 @@ struct SearchResultRow: View {
                 messageAvatar(platformBadge: Self.discordBadgeIcon)
             } else if isMail {
                 messageAvatar(platformBadge: Self.mailBadgeIcon)
-            } else if let data = result.iconData, let img = NSImage(data: data) {
+            } else if let data = result.iconData, let img = RowRendering.image(from: data) {
                 // Real macOS app icons (System Settings, Notion, Linear,
                 // …) ship a complete gradient + symbol — render them
                 // full-bleed at 36x36 without the favicon bubble.
@@ -176,11 +176,11 @@ struct SearchResultRow: View {
         [.settings, .notion, .linear]
 
     private static let discordBadgeIcon: NSImage =
-        NSWorkspace.shared.icon(forFile: "/Applications/Discord.app")
+        RowRendering.appIcon(bundleID: "com.hnc.Discord", fallbackPath: "/Applications/Discord.app")
     private static let messagesBadgeIcon: NSImage =
-        NSWorkspace.shared.icon(forFile: "/System/Applications/Messages.app")
+        RowRendering.appIcon(bundleID: "com.apple.MobileSMS", fallbackPath: "/System/Applications/Messages.app")
     private static let mailBadgeIcon: NSImage =
-        NSWorkspace.shared.icon(forFile: "/System/Applications/Mail.app")
+        RowRendering.appIcon(bundleID: "com.apple.mail", fallbackPath: "/System/Applications/Mail.app")
 
     /// Circular avatar (or initial-letter placeholder) + small platform logo
     /// badge in the bottom-right corner. Same pattern for WhatsApp, Discord,
@@ -198,11 +198,11 @@ struct SearchResultRow: View {
     }
 
     private static let whatsappBadgeIcon: NSImage =
-        NSWorkspace.shared.icon(forFile: "/Applications/WhatsApp.app")
+        RowRendering.appIcon(bundleID: "net.whatsapp.WhatsApp", fallbackPath: "/Applications/WhatsApp.app")
 
     @ViewBuilder
     private var avatarCircle: some View {
-        if let data = result.iconData, let img = NSImage(data: data) {
+        if let data = result.iconData, let img = RowRendering.image(from: data) {
             Image(nsImage: img)
                 .resizable()
                 .interpolation(.high)
@@ -224,22 +224,11 @@ struct SearchResultRow: View {
 
     private var avatarPlaceholderColor: Color {
         // Deterministic per-chat tint so the same name always gets the same color.
-        let hash = result.displayTitle.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
-        let palette: [Color] = [
-            Color(red: 0.45, green: 0.55, blue: 0.85),
-            Color(red: 0.85, green: 0.45, blue: 0.55),
-            Color(red: 0.45, green: 0.80, blue: 0.65),
-            Color(red: 0.85, green: 0.65, blue: 0.40),
-            Color(red: 0.65, green: 0.50, blue: 0.85),
-            Color(red: 0.50, green: 0.70, blue: 0.85)
-        ]
-        return palette[abs(hash) % palette.count]
+        RowRendering.placeholderColor(for: result.displayTitle)
     }
 
     private func initial(from name: String) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard let first = trimmed.first else { return "?" }
-        return String(first).uppercased()
+        RowRendering.initial(from: name)
     }
 
     /// Spotify rows: square album/playlist art (AsyncImage if we have a
@@ -279,7 +268,7 @@ struct SearchResultRow: View {
     }
 
     private static let spotifyBadgeIcon: NSImage =
-        NSWorkspace.shared.icon(forFile: "/Applications/Spotify.app")
+        RowRendering.appIcon(bundleID: "com.spotify.client", fallbackPath: "/Applications/Spotify.app")
 
     private var tintedBadge: some View {
         ZStack {
@@ -320,53 +309,15 @@ struct SearchResultRow: View {
     }
 
     private func relativeString(_ date: Date) -> String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        return f.localizedString(for: date, relativeTo: Date())
+        RowRendering.relativeString(date)
     }
 
     private var highlightedSubtitle: AttributedString {
-        let base = NSMutableAttributedString()
-
-        // Sender prefix for messages with a distinct author (Discord server
-        // channels). Rendered in a brighter color and slightly heavier
-        // weight than the message body so the eye lands on it first.
-        var bodyOffset = 0
-        if let sender = result.senderName, !sender.isEmpty {
-            let prefix = "\(sender)  "
-            base.append(NSAttributedString(string: prefix, attributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-                .foregroundColor: NSColor.labelColor
-            ]))
-            bodyOffset = prefix.count
-        }
-
-        base.append(NSAttributedString(string: result.subtitle, attributes: [
-            .font: NSFont.systemFont(ofSize: 12),
-            .foregroundColor: NSColor.secondaryLabelColor
-        ]))
-
-        let q = highlightQuery.trimmingCharacters(in: .whitespaces)
-        guard q.count >= 1 else { return AttributedString(base) }
-
-        let haystack = result.subtitle.lowercased()
-        let needle   = q.lowercased()
-        var cursor   = haystack.startIndex
-
-        while cursor < haystack.endIndex,
-              let found = haystack.range(of: needle, range: cursor..<haystack.endIndex) {
-            let nsRange = NSRange(found, in: haystack)
-            // Shift the range into the combined string's coordinate space
-            // (we may have prepended a sender prefix above).
-            let shifted = NSRange(location: nsRange.location + bodyOffset,
-                                  length: nsRange.length)
-            base.addAttributes([
-                .font: NSFont.boldSystemFont(ofSize: 12),
-                .foregroundColor: NSColor.labelColor
-            ], range: shifted)
-            cursor = found.upperBound
-        }
-        return AttributedString(base)
+        // Sender prefix (Discord server channels) renders brighter and
+        // heavier than the body so the eye lands on it first.
+        RowRendering.highlightedSubtitle(
+            result.subtitle, sender: result.senderName, query: highlightQuery
+        )
     }
 }
 

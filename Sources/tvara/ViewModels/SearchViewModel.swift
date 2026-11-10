@@ -76,7 +76,14 @@ final class SearchViewModel: ObservableObject {
     /// 4-5 times per re-eval, and a single search wave fires ~10 re-evals
     /// — so the same 8-sort/filter pipeline ran ~40+ times per search.
     /// With the cache it runs ~10 times per search (once per real change).
-    private var blendedSectionsCache: [BlendedSection]?
+    private var blendedSectionsCache: [BlendedSection]? {
+        didSet { if blendedSectionsCache == nil { allResultsCache = nil } }
+    }
+    /// Flattened + capped `.all` list derived from `blendedSectionsCache`.
+    /// `results` is read many times per SearchView body and on every ↑/↓,
+    /// so re-flattening each time was wasted work. Dropped whenever the
+    /// sections cache is invalidated.
+    private var allResultsCache: [SearchResult]?
     @Published var selectedIndex: Int = 0
     /// When the blended view's currently-selected row is the synthetic
     /// "photo collection" row, this picks which thumb inside the strip
@@ -132,8 +139,10 @@ final class SearchViewModel: ObservableObject {
             // ↑/↓ navigation and selectedIndex stay simple. Order
             // matches the visual layout in SearchView (apps → messages
             // → mail → notes → images → files → clipboard).
-            let flat = blendedSections.flatMap(\.items)
-            return Array(flat.prefix(Self.allTabResultCap))
+            if let cached = allResultsCache { return cached }
+            let flat = Array(blendedSections.flatMap(\.items).prefix(Self.allTabResultCap))
+            allResultsCache = flat
+            return flat
         case .messages:
             return Array(messagesMerged().prefix(Self.messagesTabResultCap))
         case .mail:
@@ -150,14 +159,6 @@ final class SearchViewModel: ObservableObject {
             return notesResults
         }
     }
-
-    /// Set true when the current query exactly matches a command alias
-    /// (window action, settings pane, folder shortcut, or installed app
-    /// name). Drives the allMerged filter — content sources (messages,
-    /// mail, notes, files, images, clipboard, browser) are excluded while
-    /// this is set, so typing "top right" doesn't surface random image
-    /// hits alongside the actual command.
-    @Published private(set) var commandExclusivity: Bool = false
 
     /// Compose flow: nil = normal search. When non-nil, the SearchView swaps
     /// the results area for the ComposeView. `actingOn` is set when the user
@@ -409,8 +410,8 @@ final class SearchViewModel: ObservableObject {
         switch tab {
         case .all:
             // Reflects what the merged view actually shows (capped).
-            let flat = blendedSections.flatMap(\.items)
-            return min(flat.count, Self.allTabResultCap)
+            let total = blendedSections.reduce(0) { $0 + $1.items.count }
+            return min(total, Self.allTabResultCap)
         case .messages:
             return min(messagesMerged().count, Self.messagesTabResultCap)
         case .mail:      return mailResults.count
@@ -466,7 +467,6 @@ final class SearchViewModel: ObservableObject {
             activeTab = .all
             isLoading = false; isAIThinking = false; aiExplanation = nil
             loadingSections = []
-            commandExclusivity = false
             return
         }
 
@@ -731,7 +731,9 @@ final class SearchViewModel: ObservableObject {
         // skeleton renders the instant the user finishes typing — no need
         // to repopulate here. Each per-source Task removes its own kind on
         // completion via finishSection(_:).
+        #if DEBUG
         let tKw = CFAbsoluteTimeGetCurrent()
+        #endif
 
         // Capture services as locals so the detached Tasks below don't
         // hop through `self` on MainActor just to read them — those hops
@@ -741,7 +743,6 @@ final class SearchViewModel: ObservableObject {
         let notionService    = self.notionService
         let browserService   = self.browserService
         let imageService     = self.imageService
-        let appService       = self.appService
 
         // Generic content-search fan-out. Every entry here:
         //   • runs on a detached executor (off main),
@@ -801,16 +802,13 @@ final class SearchViewModel: ObservableObject {
             await self?.assignSection(.images, searchID: searchID, results: r)
         }
 
-        // Exclusivity check — also off main until the final flag write.
-        Task.detached { [weak self] in
-            guard let self = self else { return }
-            if await self.commandExclusivity { return }
-            let exact = await appService.hasExactNameMatch(query: query)
-            if exact { await self.markExclusive(searchID: searchID) }
-        }
-
-        self.selectedIndex = 0
+        // No selectedIndex reset here: performSearch already reset it
+        // synchronously on the keystroke. Resetting again after the 80ms
+        // debounce yanked the highlight back to row 0 if the user had
+        // already pressed ↓.
+        #if DEBUG
         NSLog("KwSearch: spawned %.1fms after start", (CFAbsoluteTimeGetCurrent() - tKw) * 1000)
+        #endif
     }
 
     /// Remove a section's kind from `loadingSections` and flip `isLoading`
@@ -863,11 +861,6 @@ final class SearchViewModel: ObservableObject {
     private func assignBrowser(searchID: Int, results: [SearchResult]) {
         guard searchID == currentSearchID else { return }
         browserResults = results
-    }
-
-    private func markExclusive(searchID: Int) {
-        guard searchID == currentSearchID else { return }
-        commandExclusivity = true
     }
 
     /// Smart path: ask the LLM to plan the query, then drive existing
@@ -1978,7 +1971,6 @@ final class SearchViewModel: ObservableObject {
         selectedThumbIndex = nil
         viewMode = .blended
         isLoading = false; isAIThinking = false; aiExplanation = nil
-        commandExclusivity = false
         activeTab = .all
         composeState = nil; actingOn = nil
     }

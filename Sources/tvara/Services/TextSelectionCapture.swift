@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 
 /// Capture the currently-selected text in the frontmost app by simulating
@@ -29,7 +30,18 @@ enum TextSelectionCapture {
     static func grab() -> Result? {
         // Capture the frontmost app BEFORE we steal focus. After we open
         // our window, we'd be the frontmost app, which is useless info.
-        let sourceAppName = NSWorkspace.shared.frontmostApplication?.localizedName
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let sourceAppName = frontmost?.localizedName
+
+        // Fast path: ask Accessibility for the focused element's selected
+        // text. Native Cocoa text views answer this directly, so we skip
+        // the synthetic ⌘C, the main-thread wait and the clipboard
+        // snapshot/restore entirely. Electron/web views usually don't
+        // answer — they fall through to the ⌘C path below.
+        if let pid = frontmost?.processIdentifier,
+           let text = axSelectedText(pid: pid) {
+            return Result(text: text, sourceAppName: sourceAppName)
+        }
 
         let pb = NSPasteboard.general
         let beforeChange = pb.changeCount
@@ -47,24 +59,57 @@ enum TextSelectionCapture {
             return nil
         }
 
-        // The system needs a moment to handle the keystroke and write
-        // to the pasteboard. 80ms is empirically enough for most apps
-        // (including Chrome/Electron); 50ms is too tight, 100ms is safe.
-        // Block briefly — this runs on the main thread but it's an
-        // 80ms window we're going to spend opening the panel anyway.
-        Thread.sleep(forTimeInterval: 0.08)
+        // Poll for the copy to land instead of always sleeping the full
+        // window: most apps write within a few ms, so a real selection
+        // now opens the panel ~as soon as it's copied. 80ms stays the
+        // ceiling (empirically enough for Chrome/Electron). Apps clear
+        // the pasteboard (bumping changeCount) before writing, so keep
+        // waiting until a string is actually readable.
+        let deadline = Date().addingTimeInterval(0.08)
+        var captured: String? = nil
+        while Date() < deadline {
+            if pb.changeCount != beforeChange,
+               let s = pb.string(forType: .string) {
+                captured = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        let changed = pb.changeCount != beforeChange
 
-        let afterChange = pb.changeCount
-        let captured: String? = (afterChange > beforeChange)
-            ? pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            : nil
-
-        // Restore the user's original clipboard so we haven't polluted it.
-        // Done AFTER reading our copy.
-        restorePasteboard(pb, from: snapshot)
+        // Restore the user's original clipboard — but only if ⌘C actually
+        // touched it. Rewriting an untouched pasteboard on every panel
+        // open bumped changeCount (so clipboard history saw a phantom
+        // "new" copy) and flattened lazily-promised types for nothing.
+        if changed {
+            restorePasteboard(pb, from: snapshot)
+        }
 
         guard let text = captured, !text.isEmpty else { return nil }
         return Result(text: text, sourceAppName: sourceAppName)
+    }
+
+    /// Selected text of the focused UI element in `pid`, via the AX API.
+    /// Returns nil when the app doesn't expose it or nothing is selected.
+    /// A short messaging timeout keeps an unresponsive app from stalling
+    /// the hotkey.
+    private static func axSelectedText(pid: pid_t) -> String? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.05)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            app, kAXFocusedUIElementAttribute as CFString, &focused
+        ) == .success, let focused,
+              CFGetTypeID(focused) == AXUIElementGetTypeID()
+        else { return nil }
+        let element = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.05)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element, kAXSelectedTextAttribute as CFString, &value
+        ) == .success, let str = value as? String else { return nil }
+        let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: - Pasteboard snapshot / restore

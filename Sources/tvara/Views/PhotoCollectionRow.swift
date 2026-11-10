@@ -89,7 +89,7 @@ struct PhotoCollectionRow: View {
     private func thumb(for photo: SearchResult, index: Int) -> some View {
         let isThumbSelected = (selectedThumbIndex == index)
         Group {
-            if let data = photo.iconData, let img = NSImage(data: data) {
+            if let data = photo.iconData, let img = RowRendering.image(from: data) {
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.high)
