@@ -734,10 +734,14 @@ final class SearchViewModel: ObservableObject {
     /// the user grants access from onboarding/Settings we don't touch them.
     /// Everything else — files (mdfind against the Spotlight index), Discord
     /// (local IPC), clipboard — needs no permission and never prompts.
-    private func permits(_ kind: BlendedSection.Kind) -> Bool {
+    ///
+    /// `fullDisk` is passed in so one search checks it once: the check
+    /// probes protected files on disk, and this runs for every source on
+    /// every keystroke.
+    private func permits(_ kind: BlendedSection.Kind, fullDisk: Bool) -> Bool {
         switch kind {
         case .whatsapp, .imessage, .mail, .notes, .images:
-            return PermissionsBootstrap.currentlyGranted(.fulldisk)
+            return fullDisk
         default:
             return true
         }
@@ -777,11 +781,12 @@ final class SearchViewModel: ObservableObject {
             (.notes,     self.notesService),
             (.clipboard, self.clipboardService),
         ]
+        let fullDisk = PermissionsBootstrap.currentlyGranted(.fulldisk)
         for (kind, source) in contentSources {
             // Never query a TCC-protected source from search — that pops a
             // system permission prompt. Skip it (clearing its section) until
             // the user grants access from onboarding/Settings.
-            guard permits(kind) else {
+            guard permits(kind, fullDisk: fullDisk) else {
                 assignSection(kind, searchID: searchID, results: [])
                 continue
             }
@@ -820,7 +825,7 @@ final class SearchViewModel: ObservableObject {
         // actor checks Task.isCancelled between phases and returns []
         // early, so a fast typer doesn't queue searches behind each
         // other on the serial actor.
-        if permits(.images) {
+        if permits(.images, fullDisk: fullDisk) {
             inflightImageTask = Task.detached { [weak self] in
                 let r = await imageService.search(query)
                 if Task.isCancelled { return }
