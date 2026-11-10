@@ -125,11 +125,13 @@ final class SearchViewModel: ObservableObject {
     /// so leaving and re-entering the deck doesn't reset list selection.
     @Published var selectedCardIndex: Int = 0
 
-    /// Single source of truth for what the result list shows. Computed
-    /// fresh from the @Published backing arrays + activeTab on every
-    /// access — there's intentionally no cached `results` field, because
-    /// caching it (which we used to do) inevitably drifted out of sync
-    /// with `count(for:)` and produced the "All 3 / No matches" bug.
+    /// Single source of truth for what the result list shows, derived from
+    /// the @Published backing arrays + activeTab. There is no independently
+    /// stored `results` field — one used to drift out of sync with
+    /// `count(for:)` and produced the "All 3 / No matches" bug. The `.all`
+    /// branch is memoized in `allResultsCache`, which can't drift: it is
+    /// dropped whenever `blendedSectionsCache` is invalidated, i.e. on any
+    /// change to a source array, `expandedSections` or `loadingSections`.
     /// SwiftUI re-renders any view that reads `results` on any @Published
     /// change of the object, so this stays reactive for free.
     var results: [SearchResult] {
@@ -960,6 +962,10 @@ final class SearchViewModel: ObservableObject {
             self.linearResults = []
             self.spotifyResults = []
             self.clipboardResults = []
+            // Intentional reset: the planner's results REPLACE the list
+            // (the instant command rows are cleared above), so the row the
+            // user may have arrowed to no longer exists. Keeping the old
+            // index would highlight an unrelated row.
             self.selectedIndex = 0
             self.loadingSections.removeAll()
             self.isLoading = false
@@ -993,6 +999,10 @@ final class SearchViewModel: ObservableObject {
             self.linearResults = []
             self.spotifyResults = []
             self.clipboardResults = []
+            // Intentional reset: the planner's results REPLACE the list
+            // (the instant command rows are cleared above), so the row the
+            // user may have arrowed to no longer exists. Keeping the old
+            // index would highlight an unrelated row.
             self.selectedIndex = 0
             self.loadingSections.removeAll()
             self.isLoading = false

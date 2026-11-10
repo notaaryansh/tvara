@@ -171,6 +171,9 @@ actor FileSearchService {
     }
 
     /// Built once; this runs for every file row on every keystroke.
+    /// Overlapping searches can format at the same time and
+    /// ByteCountFormatter isn't documented as thread-safe, so access goes
+    /// through `sizeFormatterLock`.
     nonisolated(unsafe) private static let sizeFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
         f.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
@@ -178,8 +181,12 @@ actor FileSearchService {
         return f
     }()
 
+    private static let sizeFormatterLock = NSLock()
+
     nonisolated private static func formatSize(_ bytes: Int64) -> String? {
         guard bytes > 0 else { return nil }
+        sizeFormatterLock.lock()
+        defer { sizeFormatterLock.unlock() }
         return sizeFormatter.string(fromByteCount: bytes)
     }
 

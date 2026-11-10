@@ -13,19 +13,31 @@ enum RowRendering {
     /// thumbnail/avatar PNG or JPEG costs a full decode, and rows used to do
     /// it inside `body` — so moving the selection re-decoded every visible
     /// row. NSData equality is a byte compare, which is far cheaper than a
-    /// decode, and NSCache evicts under memory pressure on its own.
+    /// decode, and NSCache evicts under memory pressure on its own. Capped
+    /// by estimated decoded size as well as count, so a long session of
+    /// image-heavy searches can't pin an unbounded amount of pixels.
     private static let imageCache: NSCache<NSData, NSImage> = {
         let c = NSCache<NSData, NSImage>()
         c.countLimit = 400
+        c.totalCostLimit = 48 * 1024 * 1024
         return c
     }()
+
+    /// Rough retained bytes for a cached entry: decoded RGBA pixels of the
+    /// largest representation plus the source bytes the key holds on to.
+    private static func cost(of image: NSImage, source: Data) -> Int {
+        let pixels = image.representations
+            .map { $0.pixelsWide * $0.pixelsHigh }
+            .max() ?? 0
+        return max(pixels, 0) * 4 + source.count
+    }
 
     static func image(from data: Data?) -> NSImage? {
         guard let data, !data.isEmpty else { return nil }
         let key = data as NSData
         if let cached = imageCache.object(forKey: key) { return cached }
         guard let img = NSImage(data: data) else { return nil }
-        imageCache.setObject(img, forKey: key)
+        imageCache.setObject(img, forKey: key, cost: cost(of: img, source: data))
         return img
     }
 
