@@ -2,12 +2,13 @@ import SwiftUI
 import AppKit
 import Carbon.HIToolbox
 
-/// The hotkey picker, shared by onboarding (step 1) and Settings (Shortcut tab)
-/// so both render the exact same surface. Click Edit → chips dissolve →
-/// pulsing "Listening…" → press a combo → new chips morph in. Owns its own
-/// capture state so it drops into any container unchanged.
+/// The shortcut picker, shared by onboarding (step 1) and Settings (Shortcut
+/// tab) so both render the exact same surface. Click Change → chips dissolve →
+/// pulsing prompt → press a combo → new chips morph in. The captured combo is
+/// registered and saved through HotKeyManager, so what the chips show is
+/// always the shortcut that actually opens tvara.
 struct HotkeySection: View {
-    @State private var hotkeyChips: [String] = ["⌘", "K"]
+    @State private var hotkeyChips: [String] = HotKeyManager.shared.current.chips
 
     private enum HotkeyMode { case idle, listening, registered }
     @State private var hotkeyMode: HotkeyMode = .idle
@@ -30,7 +31,10 @@ struct HotkeySection: View {
             Spacer()
         }
         .frame(minHeight: 68)
-        .onDisappear { removeMonitor() }
+        .onDisappear {
+            // Leaving mid-capture: put the saved shortcut back in force.
+            if hotkeyMode == .listening { cancelListening() }
+        }
     }
 
     /// Chip block stays visible in every mode. During listening it fills live
@@ -88,26 +92,28 @@ struct HotkeySection: View {
     @ViewBuilder private var statusLine: some View {
         switch hotkeyMode {
         case .idle:
-            Text("Cmd+Space is taken by Spotlight — ⌘K is our default.")
+            Text(HotKeyManager.shared.current == .default
+                 ? "⌘K is the default. It works in every app, so pick something else if you already use ⌘K."
+                 : "This shortcut works in every app.")
                 .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(.white.opacity(0.66))
                 .fixedSize(horizontal: false, vertical: true)
         case .registered:
-            Text("Registered — you can summon tvara with your keyboard hotkey.")
+            Text("Saved. \(HotKeyManager.shared.current.display) now opens tvara.")
                 .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.72))
+                .foregroundColor(.white.opacity(0.78))
                 .fixedSize(horizontal: false, vertical: true)
         case .listening:
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     listeningDot
-                    Text("Listening")
+                    Text("Press your new shortcut")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white.opacity(0.90))
                 }
-                Text(hotkeyHint ?? "press any combination — Esc to cancel")
+                Text(hotkeyHint ?? "Hold ⌘, ⌥, ⌃ or ⇧ and press a key. Esc to cancel.")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(hotkeyHint == nil ? 0.44 : 0.85))
+                    .foregroundColor(.white.opacity(hotkeyHint == nil ? 0.60 : 0.90))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -133,7 +139,7 @@ struct HotkeySection: View {
             Button(action: startListening) {
                 HStack(spacing: 5) {
                     Image(systemName: "pencil").font(.system(size: 10, weight: .semibold))
-                    Text("Edit").font(.system(size: 11, weight: .medium))
+                    Text("Change").font(.system(size: 11, weight: .medium))
                 }
                 .foregroundColor(.white.opacity(0.80))
                 .padding(.horizontal, 11)
@@ -141,6 +147,7 @@ struct HotkeySection: View {
                 .glassCapsule(fallbackStroke: 0.28)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Change shortcut")
             .transition(.opacity.combined(with: .scale(scale: 0.90)))
         case .listening:
             Button(action: cancelListening) {
@@ -163,6 +170,23 @@ struct HotkeySection: View {
             .frame(minWidth: 54, minHeight: 54)
             .padding(.horizontal, 14)
             .glassSurface(cornerRadius: 12, fallbackFill: 0.06, fallbackStroke: 0.28)
+            .accessibilityLabel(Self.spokenName(for: chip))
+    }
+
+    /// VoiceOver reads the bare glyphs unreliably ("place of interest sign"
+    /// for ⌘), so spell the modifiers out.
+    private static func spokenName(for chip: String) -> String {
+        switch chip {
+        case "⌘": return "Command"
+        case "⌥": return "Option"
+        case "⌃": return "Control"
+        case "⇧": return "Shift"
+        case "↩": return "Return"
+        case "⇥": return "Tab"
+        case "⌫": return "Delete"
+        case "⌦": return "Forward Delete"
+        default:  return chip
+        }
     }
 
     // MARK: - Capture
@@ -181,6 +205,10 @@ struct HotkeySection: View {
             }
         }
 
+        // Release the live shortcut while capturing — otherwise Carbon
+        // swallows it and the user can't re-pick the keys they already have.
+        HotKeyManager.shared.suspend()
+
         removeMonitor()
         keyMonitorToken = NSEvent.addLocalMonitorForEvents(
             matching: [.keyDown, .flagsChanged]
@@ -188,7 +216,7 @@ struct HotkeySection: View {
             if event.type == .flagsChanged {
                 let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 let chips = modifierChipList(for: mods)
-                hotkeyHint = chips.count > 3 ? "2 or 3 keys only — release one." : nil
+                hotkeyHint = chips.count > 3 ? "That's too many keys. Use up to three." : nil
                 withAnimation(.spring(response: 0.32, dampingFraction: 0.62)) {
                     hotkeyChips = chips
                 }
@@ -203,13 +231,22 @@ struct HotkeySection: View {
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             var chips = modifierChipList(for: mods)
             guard !chips.isEmpty else {
-                hotkeyHint = "Hold at least one modifier (⌘, ⌥, ⌃, or ⇧)."
+                hotkeyHint = "Add a modifier first: ⌘, ⌥, ⌃ or ⇧."
                 return nil
             }
             guard let keyChip = keyChipLabel(for: event) else { return nil }
             chips.append(keyChip)
             if chips.count > 3 {
-                hotkeyHint = "2 or 3 keys only — release one and try again."
+                hotkeyHint = "That's too many keys. Use up to three."
+                return nil
+            }
+
+            // Register for real. If the system refuses the combo, say so and
+            // keep listening instead of showing a shortcut that won't work.
+            let candidate = Hotkey(keyCode: event.keyCode, flags: mods, keyLabel: keyChip)
+            guard HotKeyManager.shared.update(to: candidate) else {
+                HotKeyManager.shared.suspend()
+                hotkeyHint = "\(candidate.display) isn't available. Try a different shortcut."
                 return nil
             }
 
@@ -226,6 +263,7 @@ struct HotkeySection: View {
 
     private func cancelListening() {
         removeMonitor()
+        HotKeyManager.shared.resume()
         hotkeyHint = nil
         listeningPulse = false
         withAnimation(.spring(response: 0.32, dampingFraction: 0.62)) { hotkeyChips = preListenChips }

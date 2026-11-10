@@ -25,6 +25,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.animationBehavior = .none
+        // White-on-dark glass design; see OnboardingWindowController.
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
 
         super.init(window: panel)

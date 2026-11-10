@@ -80,6 +80,7 @@ struct SettingsView: View {
                 .glassCapsule(fallbackFill: 0.05, fallbackStroke: 0.22)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Close Settings")
         .padding(16)
     }
 
@@ -88,8 +89,8 @@ struct SettingsView: View {
     private var shortcutTab: some View {
         VStack(alignment: .leading, spacing: 22) {
             header(kicker: "Shortcut",
-                   title: "Open tvara.",
-                   subtitle: "Press this anywhere to summon the launcher.")
+                   title: "Your shortcut.",
+                   subtitle: "Press it anywhere to open tvara.")
             HotkeySection()
             Spacer(minLength: 0)
         }
@@ -99,8 +100,8 @@ struct SettingsView: View {
     private var permissionsTab: some View {
         VStack(alignment: .leading, spacing: 20) {
             header(kicker: "Permissions",
-                   title: "Access.",
-                   subtitle: "Grant only what you want — nothing is asked until you tap.")
+                   title: "What tvara can use.",
+                   subtitle: "All optional. tvara asks for nothing until you click.")
             PermissionsSection(onPermissionsChanged: onPermissionsChanged)
             Spacer(minLength: 0)
         }
@@ -113,7 +114,7 @@ struct SettingsView: View {
             Text(kicker.uppercased())
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .tracking(1.5)
-                .foregroundColor(.white.opacity(0.55))
+                .foregroundColor(.white.opacity(0.60))
             Text(title)
                 .font(.system(size: 32, weight: .semibold))
                 .foregroundColor(.white.opacity(0.95))
@@ -121,7 +122,7 @@ struct SettingsView: View {
             if let subtitle {
                 Text(subtitle)
                     .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.55))
+                    .foregroundColor(.white.opacity(0.66))
             }
         }
     }

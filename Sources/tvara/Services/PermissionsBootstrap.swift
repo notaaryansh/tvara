@@ -21,10 +21,10 @@ enum PermissionsBootstrap {
     /// match the `id` strings passed to `permissionRow(id:...)` in
     /// OnboardingView, so the view can map a row straight to a request.
     enum Permission: String {
-        case accessibility          // global hotkey chrome + text injection
+        case accessibility          // window commands + reading selected text
         case contacts               // name → phone/email lookup
-        case automation             // Messages/Spotify AppleScript + Calendar
-        case fulldisk               // Full Disk Access + Desktop/Docs/Downloads
+        case automation             // Calendar + Messages/Spotify AppleScript
+        case fulldisk               // Mail / Messages / Notes / files / photos
     }
 
     // MARK: - Public API (called from OnboardingView)
@@ -49,8 +49,29 @@ enum PermissionsBootstrap {
             Task.detached { requestAutomationTargets() }
             return await requestCalendar()
         case .fulldisk:
-            requestUserFolders()
+            // Full Disk Access can't be granted from a dialog — the probe
+            // just makes tvara show up in the System Settings list, and the
+            // caller opens that pane. (We used to list Desktop / Documents /
+            // Downloads here too, which stacked three more system dialogs
+            // under the Settings window; Full Disk Access covers all three.)
             return probeFullDiskAccess()
+        }
+    }
+
+    /// True when clicking the row can't produce an in-place system dialog,
+    /// so the only way forward is the System Settings pane: Accessibility
+    /// and Full Disk Access always, the others once the user has said no.
+    /// Drives the row's button label ("Allow" vs "Open Settings").
+    static func needsSystemSettings(_ permission: Permission) -> Bool {
+        switch permission {
+        case .accessibility, .fulldisk:
+            return true
+        case .contacts:
+            let status = CNContactStore.authorizationStatus(for: .contacts)
+            return status == .denied || status == .restricted
+        case .automation:
+            let status = EKEventStore.authorizationStatus(for: .event)
+            return status == .denied || status == .restricted
         }
     }
 
@@ -138,18 +159,6 @@ enum PermissionsBootstrap {
         return false
     }
 
-    // MARK: - Desktop / Documents / Downloads (per-folder TCC)
-
-    /// Listing each folder once prompts on first access and silently succeeds
-    /// afterwards — same shape as FDA, no public status API.
-    private static func requestUserFolders() {
-        let home = NSHomeDirectory()
-        for folder in ["Desktop", "Documents", "Downloads"] {
-            _ = try? FileManager.default
-                .contentsOfDirectory(atPath: "\(home)/\(folder)")
-        }
-    }
-
     // MARK: - Automation → Messages / Spotify
 
     private static func requestAutomationTargets() {
@@ -188,7 +197,7 @@ extension PermissionsBootstrap.Permission {
         switch self {
         case .accessibility: return "Accessibility"
         case .contacts:      return "Contacts"
-        case .automation:    return "Automation"
+        case .automation:    return "Calendar & Messages"
         case .fulldisk:      return "Full Disk Access"
         }
     }
@@ -196,10 +205,10 @@ extension PermissionsBootstrap.Permission {
     /// One-line rationale shown under the title.
     var rationale: String {
         switch self {
-        case .accessibility: return "Global hotkey and text injection"
-        case .contacts:      return "Look up people by name for iMessage & email"
-        case .automation:    return "Send iMessages and create calendar events"
-        case .fulldisk:      return "Index Mail, Notes and files beyond your Downloads"
+        case .accessibility: return "Move and resize windows, and use text you've selected"
+        case .contacts:      return "Find people by name when you message them"
+        case .automation:    return "Create calendar events and send iMessages"
+        case .fulldisk:      return "Search Mail, Messages, Notes, photos and files"
         }
     }
 
@@ -208,7 +217,7 @@ extension PermissionsBootstrap.Permission {
         switch self {
         case .accessibility: return "hand.tap"
         case .contacts:      return "person.crop.circle"
-        case .automation:    return "app.connected.to.app.below.fill"
+        case .automation:    return "calendar"
         case .fulldisk:      return "internaldrive"
         }
     }
@@ -221,7 +230,9 @@ extension PermissionsBootstrap.Permission {
         switch self {
         case .accessibility: anchor = "Privacy_Accessibility"
         case .contacts:      anchor = "Privacy_Contacts"
-        case .automation:    anchor = "Privacy_Automation"
+        // The row's status follows Calendar (the only part with a status
+        // API), so send people to the toggle that actually flips the pill.
+        case .automation:    anchor = "Privacy_Calendars"
         case .fulldisk:      anchor = "Privacy_AllFiles"
         }
         return URL(string: base + anchor)
@@ -249,7 +260,7 @@ extension PermissionsBootstrap {
         alert.messageText = "tvara needs \(permission.title) access"
         alert.informativeText = permission.rationale + "."
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Not Now")
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
