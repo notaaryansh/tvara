@@ -55,7 +55,7 @@ struct CompactMessageRow: View {
 
     @ViewBuilder
     private var avatar: some View {
-        if let data = result.iconData, let img = NSImage(data: data) {
+        if let data = result.iconData, let img = RowRendering.image(from: data) {
             Image(nsImage: img)
                 .resizable()
                 .interpolation(.high)
@@ -77,65 +77,23 @@ struct CompactMessageRow: View {
     }
 
     private var placeholderColor: Color {
-        let hash = result.displayTitle.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
-        let palette: [Color] = [
-            Color(red: 0.45, green: 0.55, blue: 0.85),
-            Color(red: 0.85, green: 0.45, blue: 0.55),
-            Color(red: 0.45, green: 0.80, blue: 0.65),
-            Color(red: 0.85, green: 0.65, blue: 0.40),
-            Color(red: 0.65, green: 0.50, blue: 0.85),
-            Color(red: 0.50, green: 0.70, blue: 0.85)
-        ]
-        return palette[abs(hash) % palette.count]
+        RowRendering.placeholderColor(for: result.displayTitle)
     }
 
     private func initial(from name: String) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard let first = trimmed.first else { return "?" }
-        return String(first).uppercased()
+        RowRendering.initial(from: name)
     }
 
     private func relativeString(_ date: Date) -> String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        return f.localizedString(for: date, relativeTo: Date())
+        RowRendering.relativeString(date)
     }
 
     /// Discord rows ship a senderName separate from the conversation
     /// title; prepend it bold so the eye lands on it first, like the
     /// full row does. Other platforms just show the message body.
     private var highlightedBody: AttributedString {
-        let base = NSMutableAttributedString()
-        var bodyOffset = 0
-        if let sender = result.senderName, !sender.isEmpty {
-            let prefix = "\(sender)  "
-            base.append(NSAttributedString(string: prefix, attributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-                .foregroundColor: NSColor.labelColor
-            ]))
-            bodyOffset = prefix.count
-        }
-        base.append(NSAttributedString(string: result.subtitle, attributes: [
-            .font: NSFont.systemFont(ofSize: 12),
-            .foregroundColor: NSColor.secondaryLabelColor
-        ]))
-
-        let q = highlightQuery.trimmingCharacters(in: .whitespaces)
-        guard q.count >= 1 else { return AttributedString(base) }
-        let haystack = result.subtitle.lowercased()
-        let needle = q.lowercased()
-        var cursor = haystack.startIndex
-        while cursor < haystack.endIndex,
-              let found = haystack.range(of: needle, range: cursor..<haystack.endIndex) {
-            let nsRange = NSRange(found, in: haystack)
-            let shifted = NSRange(location: nsRange.location + bodyOffset,
-                                  length: nsRange.length)
-            base.addAttributes([
-                .font: NSFont.boldSystemFont(ofSize: 12),
-                .foregroundColor: NSColor.labelColor
-            ], range: shifted)
-            cursor = found.upperBound
-        }
-        return AttributedString(base)
+        RowRendering.highlightedSubtitle(
+            result.subtitle, sender: result.senderName, query: highlightQuery
+        )
     }
 }
