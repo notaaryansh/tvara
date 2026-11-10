@@ -34,13 +34,20 @@ enum TextSelectionCapture {
         let sourceAppName = frontmost?.localizedName
 
         // Fast path: ask Accessibility for the focused element's selected
-        // text. Native Cocoa text views answer this directly, so we skip
-        // the synthetic ⌘C, the main-thread wait and the clipboard
-        // snapshot/restore entirely. Electron/web views usually don't
-        // answer — they fall through to the ⌘C path below.
-        if let pid = frontmost?.processIdentifier,
-           let text = axSelectedText(pid: pid) {
-            return Result(text: text, sourceAppName: sourceAppName)
+        // text. Native text views answer this directly, so we skip the
+        // synthetic ⌘C, the main-thread wait and the clipboard
+        // snapshot/restore entirely — both when there IS a selection and
+        // when a native text field tells us there is none. Only apps that
+        // don't answer (Electron/web views, mostly) fall through to ⌘C.
+        if let pid = frontmost?.processIdentifier {
+            switch axSelection(pid: pid) {
+            case .text(let text):
+                return Result(text: text, sourceAppName: sourceAppName)
+            case .nothingSelected:
+                return nil
+            case .unknown:
+                break
+            }
         }
 
         let pb = NSPasteboard.general
@@ -89,27 +96,65 @@ enum TextSelectionCapture {
         return Result(text: text, sourceAppName: sourceAppName)
     }
 
-    /// Selected text of the focused UI element in `pid`, via the AX API.
-    /// Returns nil when the app doesn't expose it or nothing is selected.
-    /// A short messaging timeout keeps an unresponsive app from stalling
-    /// the hotkey.
-    private static func axSelectedText(pid: pid_t) -> String? {
+    private enum AXSelection {
+        case text(String)
+        /// A native text control answered and has no selection — definitive.
+        case nothingSelected
+        /// The app didn't answer or doesn't expose selection; try ⌘C.
+        case unknown
+    }
+
+    /// Total time the AX queries below may block the hotkey, across all of
+    /// them. Responsive apps answer in a few ms; an unresponsive one costs
+    /// at most this before we move on.
+    private static let axBudget: TimeInterval = 0.05
+
+    /// Roles whose empty `AXSelectedText` really means "nothing selected".
+    /// Other elements (web areas, groups) often report an empty string even
+    /// when text is highlighted, so those stay `.unknown`.
+    private static let textRoles: Set<String> = [
+        kAXTextFieldRole as String, kAXTextAreaRole as String,
+        kAXComboBoxRole as String,
+    ]
+
+    /// Selection state of the focused UI element in `pid`, via the AX API.
+    private static func axSelection(pid: pid_t) -> AXSelection {
+        let deadline = Date().addingTimeInterval(axBudget)
+        /// Give `element` whatever is left of the shared budget; false when
+        /// it's spent.
+        func arm(_ element: AXUIElement) -> Bool {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0.005 else { return false }
+            AXUIElementSetMessagingTimeout(element, Float(remaining))
+            return true
+        }
+
         let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.05)
+        guard arm(app) else { return .unknown }
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             app, kAXFocusedUIElementAttribute as CFString, &focused
         ) == .success, let focused,
               CFGetTypeID(focused) == AXUIElementGetTypeID()
-        else { return nil }
+        else { return .unknown }
         let element = focused as! AXUIElement
-        AXUIElementSetMessagingTimeout(element, 0.05)
+
+        guard arm(element) else { return .unknown }
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             element, kAXSelectedTextAttribute as CFString, &value
-        ) == .success, let str = value as? String else { return nil }
+        ) == .success, let str = value as? String else { return .unknown }
         let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        if !trimmed.isEmpty { return .text(trimmed) }
+
+        guard arm(element) else { return .unknown }
+        var role: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element, kAXRoleAttribute as CFString, &role
+        ) == .success, let roleName = role as? String,
+              textRoles.contains(roleName)
+        else { return .unknown }
+        return .nothingSelected
     }
 
     // MARK: - Pasteboard snapshot / restore

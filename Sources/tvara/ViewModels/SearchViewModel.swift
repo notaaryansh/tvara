@@ -125,11 +125,13 @@ final class SearchViewModel: ObservableObject {
     /// so leaving and re-entering the deck doesn't reset list selection.
     @Published var selectedCardIndex: Int = 0
 
-    /// Single source of truth for what the result list shows. Computed
-    /// fresh from the @Published backing arrays + activeTab on every
-    /// access — there's intentionally no cached `results` field, because
-    /// caching it (which we used to do) inevitably drifted out of sync
-    /// with `count(for:)` and produced the "All 3 / No matches" bug.
+    /// Single source of truth for what the result list shows, derived from
+    /// the @Published backing arrays + activeTab. There is no independently
+    /// stored `results` field — one used to drift out of sync with
+    /// `count(for:)` and produced the "All 3 / No matches" bug. The `.all`
+    /// branch is memoized in `allResultsCache`, which can't drift: it is
+    /// dropped whenever `blendedSectionsCache` is invalidated, i.e. on any
+    /// change to a source array, `expandedSections` or `loadingSections`.
     /// SwiftUI re-renders any view that reads `results` on any @Published
     /// change of the object, so this stays reactive for free.
     var results: [SearchResult] {
@@ -726,6 +728,25 @@ final class SearchViewModel: ObservableObject {
     /// The function returns immediately after spawning the tasks; the
     /// per-source Tasks each call `finishSection(_:)` on completion which
     /// flips `isLoading` to false once the last section finishes.
+    /// Whether a content source may be queried from search without triggering
+    /// a system permission prompt. The Full-Disk-gated sources read protected
+    /// data (Messages/Mail/Notes DBs, the Photos-adjacent image index); until
+    /// the user grants access from onboarding/Settings we don't touch them.
+    /// Everything else — files (mdfind against the Spotlight index), Discord
+    /// (local IPC), clipboard — needs no permission and never prompts.
+    ///
+    /// `fullDisk` is passed in so one search checks it once: the check
+    /// probes protected files on disk, and this runs for every source on
+    /// every keystroke.
+    private func permits(_ kind: BlendedSection.Kind, fullDisk: Bool) -> Bool {
+        switch kind {
+        case .whatsapp, .imessage, .mail, .notes, .images:
+            return fullDisk
+        default:
+            return true
+        }
+    }
+
     private func runKeywordSearch(query: String, searchID: Int) async {
         // loadingSections was populated synchronously in search() so the
         // skeleton renders the instant the user finishes typing — no need
@@ -760,7 +781,15 @@ final class SearchViewModel: ObservableObject {
             (.notes,     self.notesService),
             (.clipboard, self.clipboardService),
         ]
+        let fullDisk = PermissionsBootstrap.currentlyGranted(.fulldisk)
         for (kind, source) in contentSources {
+            // Never query a TCC-protected source from search — that pops a
+            // system permission prompt. Skip it (clearing its section) until
+            // the user grants access from onboarding/Settings.
+            guard permits(kind, fullDisk: fullDisk) else {
+                assignSection(kind, searchID: searchID, results: [])
+                continue
+            }
             Task.detached { [weak self] in
                 let r = await source.search(query: query, limit: 30)
                 let history = await historyStore.lookup(r.compactMap(\.stableId))
@@ -796,10 +825,14 @@ final class SearchViewModel: ObservableObject {
         // actor checks Task.isCancelled between phases and returns []
         // early, so a fast typer doesn't queue searches behind each
         // other on the serial actor.
-        inflightImageTask = Task.detached { [weak self] in
-            let r = await imageService.search(query)
-            if Task.isCancelled { return }
-            await self?.assignSection(.images, searchID: searchID, results: r)
+        if permits(.images, fullDisk: fullDisk) {
+            inflightImageTask = Task.detached { [weak self] in
+                let r = await imageService.search(query)
+                if Task.isCancelled { return }
+                await self?.assignSection(.images, searchID: searchID, results: r)
+            }
+        } else {
+            assignSection(.images, searchID: searchID, results: [])
         }
 
         // No selectedIndex reset here: performSearch already reset it
@@ -960,6 +993,10 @@ final class SearchViewModel: ObservableObject {
             self.linearResults = []
             self.spotifyResults = []
             self.clipboardResults = []
+            // Intentional reset: the planner's results REPLACE the list
+            // (the instant command rows are cleared above), so the row the
+            // user may have arrowed to no longer exists. Keeping the old
+            // index would highlight an unrelated row.
             self.selectedIndex = 0
             self.loadingSections.removeAll()
             self.isLoading = false
@@ -993,6 +1030,10 @@ final class SearchViewModel: ObservableObject {
             self.linearResults = []
             self.spotifyResults = []
             self.clipboardResults = []
+            // Intentional reset: the planner's results REPLACE the list
+            // (the instant command rows are cleared above), so the row the
+            // user may have arrowed to no longer exists. Keeping the old
+            // index would highlight an unrelated row.
             self.selectedIndex = 0
             self.loadingSections.removeAll()
             self.isLoading = false
