@@ -48,7 +48,10 @@ struct SearchView: View {
         .frame(width: bubbleWidth)
         // Full glass: the clear variant, with no tint and no dimming layer,
         // so the panel is glass all the way through.
-        .glassSurface(cornerRadius: 16)
+        // A light tint in the glass itself (not a layer over it): just
+        // enough to keep text readable when a bright or busy window sits
+        // behind the panel, while it still reads as clear glass.
+        .glassSurface(cornerRadius: 16, tint: Color.black.opacity(0.2))
         .padding(.top, 4)
         // Single binary mode token drives the bubble's resize. Each
         // discrete mode (no query, results-pending, results-shown,

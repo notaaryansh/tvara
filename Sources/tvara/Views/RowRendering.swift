@@ -114,12 +114,22 @@ enum RowRendering {
     /// Gap between the highlight and the panel edge.
     static let selectionInset: CGFloat = 6
 
-    /// Background for a selectable row. Always present (clear when not
-    /// selected) so row geometry never changes with selection.
+    /// Resting fill behind every row: darker than the panel's glass, so
+    /// each row reads as its own solid strip and its text stays legible
+    /// whatever window is behind the panel.
+    static let rowFill = Color.black.opacity(0.28)
+
+    /// Background for a selectable row. Always present so row geometry
+    /// never changes with selection: the resting fill, plus the highlight
+    /// on top when selected. The 1.5pt vertical inset leaves a hairline of
+    /// clear glass between neighbouring rows.
     static func selectionBackground(_ isSelected: Bool) -> some View {
-        RoundedRectangle(cornerRadius: selectionCornerRadius, style: .continuous)
-            .fill(isSelected ? selectionFill : Color.clear)
+        let shape = RoundedRectangle(cornerRadius: selectionCornerRadius, style: .continuous)
+        return shape
+            .fill(rowFill)
+            .overlay(shape.fill(isSelected ? selectionFill : Color.clear))
             .padding(.horizontal, selectionInset)
+            .padding(.vertical, 1.5)
     }
 
     // MARK: - Platform badge icons
