@@ -321,7 +321,24 @@ To reproduce, with all three running:
 scripts/bench-memory.sh --samples 6 --interval 10
 ```
 
-Speed is measured by `scripts/bench-launchers.swift` (time to open the
+## Launch time, measured against other launchers
+
+Time from opening the app until macOS reports it has finished launching
+(`NSRunningApplication.isFinishedLaunching`). Each app is quit and
+relaunched six times; the first launch is discarded and the median of the
+other five is shown. Same machine and day as the memory table.
+
+| Launcher | Launch, median | Range |
+|---|---|---|
+| tvara | 96 ms | 91–108 ms |
+| Alfred 5.8 | 114 ms | 105–121 ms |
+| Raycast 2.11 | 234 ms | 228–267 ms |
+
+```bash
+swift scripts/bench-launch.swift "/Applications/Alfred 5.app" /Applications/Raycast.app ./tvara.app
+```
+
+Search speed is measured by `scripts/bench-launchers.swift` (time to open the
 panel, time to first result). It needs Accessibility permission for the
 terminal that runs it; no results are recorded here yet.
 

@@ -34,12 +34,14 @@ stream in as each one returns, so you never wait on the slowest.
 | Searches iMessage | ✓ | ✓ | – | – |
 | Finds photos by what's in them | ✓ | ✓ | – | – |
 | Snaps windows | ✓ | – | – | ✓ |
+| Launch time | 96 ms | n/a | 114 ms | 234 ms |
 | Memory at idle | 36 MB | n/a | 29 MB | 57 MB |
 | Open source | ✓ | – | – | – |
 | Price | Free | Built in | Free, paid Powerpack | Free, paid Pro |
 
 Built-in features only; Alfred and Raycast can add more through
-workflows and extensions. Memory measured on an Apple M4, macOS 27; see
+workflows and extensions. Launch time and memory measured on an Apple M4,
+macOS 27; see
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md) to reproduce it.
 
 ## What it opens and searches
