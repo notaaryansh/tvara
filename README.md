@@ -23,11 +23,22 @@ history from the same box you launch apps from.
 as your keystroke. Most other sources answer in 10–70 ms, and results
 stream in as each one returns, so you never wait on the slowest.
 
-**It's light.** tvara idles at about 65 MB. Photo search loads its
-model only when you search photos and frees it a minute later.
+**It's free and open source.** No account, no paid tier, no analytics.
 
-Per-source numbers and how they were measured are in
-[docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+## How it compares
+
+| | tvara | Spotlight | Alfred | Raycast |
+| --- | :---: | :---: | :---: | :---: |
+| Searches WhatsApp messages | ✓ | – | – | – |
+| Searches Discord messages | ✓ | – | – | – |
+| Searches iMessage | ✓ | ✓ | – | – |
+| Finds photos by what's in them | ✓ | ✓ | – | – |
+| Snaps windows | ✓ | – | – | ✓ |
+| Open source | ✓ | – | – | – |
+| Price | Free | Built in | Free, paid Powerpack | Free, paid Pro |
+
+Built-in features only; Alfred and Raycast can add more through
+workflows and extensions.
 
 ## What it opens and searches
 

@@ -297,40 +297,30 @@ Otherwise the keyword fan-out runs directly.
 
 ---
 
-## Memory, measured
+## Memory, measured against other launchers
 
 Measured with `scripts/bench-memory.sh` (which reads `phys_footprint`, the
-number Activity Monitor shows) on an Apple M4 with 16 GB RAM, macOS 27.0,
-release build, 2026-11-11.
+number Activity Monitor shows, summed over every process in the app's
+bundle) on an Apple M4 with 16 GB RAM, macOS 27.0, 2026-11-11. Each app
+had been running idle for 4–10 minutes; six samples, ten seconds apart.
 
-| State | Footprint |
+| Launcher | Idle footprint |
 |---|---|
-| Idle after launch, warm icon cache | 42 MB |
-| Idle after a search (`-benchQuery "screenshot"`) | 64 MB |
-| Peak during that run | 75 MB |
-| Cold icon cache (first launch), settled | 145 MB |
-| Cold icon cache, peak | 269 MB |
+| Alfred 5.8 | 27 MB |
+| Raycast 2.11 | 56 MB |
+| tvara (this branch) | 81–82 MB |
 
-**Scope of these numbers.** Full Disk Access was NOT granted to the build
-that was measured, so Mail, Messages, WhatsApp, Notes and photo search
-were off. Apps, files, Discord, clipboard, settings and window commands
-were on. The figure with every source on still needs measuring; the table
-below is the older estimate for that case.
+tvara's launch peak in the same run was 892 MB before settling.
 
-Before the 2026-11 fix, a cold icon cache peaked above 9 GB: each app icon
-was serialized to an uncompressed TIFF of every size in its `.icns`
-(~35 MB) inside a loop that never drained them.
-
-To reproduce:
+To reproduce, with all three running:
 
 ```bash
-scripts/build-app.sh
-open -g ./tvara.app --args -benchQuery "screenshot"
-scripts/bench-memory.sh --samples 12 --interval 10 --detail
+scripts/bench-memory.sh --samples 6 --interval 10
 ```
 
-`scripts/bench-memory.sh` also reports Raycast, Alfred and Spotlight when
-they are running, for a side-by-side table.
+Speed is measured by `scripts/bench-launchers.swift` (time to open the
+panel, time to first result). It needs Accessibility permission for the
+terminal that runs it; no results are recorded here yet.
 
 ## Memory + RAM budget (estimate, every source on)
 

@@ -26,8 +26,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Display name : exact process name
-APPS=("tvara:tvara" "Raycast:Raycast" "Alfred:Alfred" "Spotlight:Spotlight")
+# Display name : app bundle name. Every process running out of that bundle
+# is summed, because some launchers split their work across helpers.
+APPS=("tvara:tvara.app" "Raycast:Raycast.app" "Alfred:Alfred" "Spotlight:Spotlight.app")
 
 # Footprint of one pid in MB (integer), or empty if it can't be read.
 footprint_mb() {
@@ -35,33 +36,43 @@ footprint_mb() {
         | awk '/phys_footprint:/ { v=$2; u=$3;
                  if (u=="GB") v*=1024; else if (u=="KB") v/=1024;
                  else if (u=="B") v/=1048576;
-                 printf "%d", v + 0.5; exit }'
+                 printf "%d", v + 0.5 }'
+}
+
+# Pids of every process whose executable path is inside the named bundle.
+bundle_pids() {
+    ps axo pid=,comm= | awk -v pat="/$1" 'index($0, pat) && /\.app\/Contents\// { print $1 }'
 }
 
 echo "macOS $(sw_vers -productVersion), $(sysctl -n machdep.cpu.brand_string), $(( $(sysctl -n hw.memsize) / 1073741824 )) GB RAM"
 echo
-echo "| App | Min (MB) | Max (MB) | Samples |"
-echo "| --- | ---: | ---: | ---: |"
+echo "| App | Min (MB) | Max (MB) | Processes | Samples |"
+echo "| --- | ---: | ---: | ---: | ---: |"
 
 for entry in "${APPS[@]}"; do
-    name="${entry%%:*}"; proc="${entry##*:}"
-    pid="$(pgrep -x "$proc" | head -1 || true)"
-    if [[ -z "$pid" ]]; then
-        echo "| $name | not running | | |"
+    name="${entry%%:*}"; bundle="${entry##*:}"
+    pids="$(bundle_pids "$bundle" || true)"
+    if [[ -z "$pids" ]]; then
+        echo "| $name | not running | | | |"
         continue
     fi
+    count="$(echo "$pids" | wc -l | tr -d ' ')"
     min=""; max=""; n=0
     for ((i = 0; i < SAMPLES; i++)); do
-        mb="$(footprint_mb "$pid")"
+        total=0
+        for pid in $pids; do
+            mb="$(footprint_mb "$pid" || true)"
+            [[ -n "$mb" ]] && total=$((total + mb))
+        done
         # A process that is still launching can report 0; skip those.
-        if [[ -n "$mb" && "$mb" -gt 0 ]]; then
-            [[ -z "$min" || "$mb" -lt "$min" ]] && min="$mb"
-            [[ -z "$max" || "$mb" -gt "$max" ]] && max="$mb"
+        if [[ "$total" -gt 0 ]]; then
+            if [[ -z "$min" || "$total" -lt "$min" ]]; then min="$total"; fi
+            if [[ -z "$max" || "$total" -gt "$max" ]]; then max="$total"; fi
             n=$((n + 1))
         fi
-        (( i + 1 < SAMPLES )) && sleep "$INTERVAL"
+        if (( i + 1 < SAMPLES )); then sleep "$INTERVAL"; fi
     done
-    echo "| $name | ${min:-?} | ${max:-?} | $n |"
+    echo "| $name | ${min:-?} | ${max:-?} | $count | $n |"
 done
 
 if [[ "$DETAIL" == 1 ]]; then
