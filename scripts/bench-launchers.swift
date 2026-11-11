@@ -4,6 +4,7 @@
 //   swift scripts/bench-launchers.swift                 # defaults below
 //   swift scripts/bench-launchers.swift --trials 15 --query saf --expect Safari
 //   swift scripts/bench-launchers.swift --hotkey raycast=ctrl+space
+//   swift scripts/bench-launchers.swift --skip spotlight   # leave one out
 //
 // For every launcher that is running it repeats, `--trials` times:
 //   1. press the launcher's shortcut           → time until its window is on screen
@@ -64,6 +65,8 @@ while !args.isEmpty {
               let i = launchers.firstIndex(where: { $0.name.lowercased() == parts[0].lowercased() })
         else { fatalError("--hotkey expects name=combo, e.g. raycast=ctrl+space") }
         launchers[i].hotkey = parts[1]
+    case "--skip":
+        launchers.removeAll { $0.name.lowercased() == value.lowercased() }
     default: fatalError("unknown option \(flag)")
     }
 }
