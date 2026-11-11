@@ -1,6 +1,6 @@
 # tvara
 
-**Open and search anything on your Mac. Fast, and light on memory.**
+**One search box for your Mac, including your messages.**
 
 [Download for Mac](https://github.com/notaaryansh/tvara/releases/latest) · [trytvara.com](https://trytvara.com)
 
@@ -8,10 +8,16 @@
   <img src="Resources/demo.gif" alt="tvara demo" width="100%" />
 </p>
 
-Press `⌘K` anywhere, type a few letters, press `↩`. One search box for
-your apps, files, messages, mail, notes and photos.
+Press `⌘K` anywhere, type a few letters, press `↩`. tvara opens your
+apps and files like any launcher. It also searches the things other
+launchers can't reach: your iMessage, WhatsApp and Discord
+conversations, your mail, your notes, and what's inside your photos.
 
 ## Why tvara
+
+**It finds what you said, not just what you saved.** "The address Sam
+sent me" lives in a chat, not a file. tvara searches your message
+history from the same box you launch apps from.
 
 **It's fast.** Apps and commands match in under 5 ms, in the same frame
 as your keystroke. Most other sources answer in 10–70 ms, and results
@@ -26,8 +32,8 @@ Per-source numbers and how they were measured are in
 
 ## What it opens and searches
 
-- Apps, files and folders
 - Messages: iMessage, WhatsApp, Discord
+- Apps, files and folders
 - Mail and Notes
 - Photos, by what's in them ("dog at the beach")
 - Clipboard history
