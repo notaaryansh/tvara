@@ -45,7 +45,10 @@ struct SearchView: View {
             }
         }
         .frame(width: bubbleWidth)
-        .glassSurface(cornerRadius: 16)
+        // Dark tint on the glass. Untinted, the panel is clear enough that
+        // a bright window behind it shows through as a pale gray patch,
+        // which reads as a second surface sitting under the results.
+        .glassSurface(cornerRadius: 16, tint: Color.black.opacity(0.45))
         .padding(.top, 4)
         // Single binary mode token drives the bubble's resize. Each
         // discrete mode (no query, results-pending, results-shown,
