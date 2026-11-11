@@ -298,7 +298,7 @@ final class SearchViewModel: ObservableObject {
         self.embeddingStore = embeddingStore
         self.historyStore = historyStore
 
-        // Drop the ~300 MB CLIP/MPSGraph state after 5 min idle (or on
+        // Drop the CLIP/MPSGraph state after a minute idle (or on
         // system memory pressure). Live FSEvents indexing and backfill
         // sweeps both go through ensureModels(), so they just re-trigger
         // a 50-100ms reload and run normally.
@@ -375,8 +375,12 @@ final class SearchViewModel: ObservableObject {
         // Automation-gated: Calendar create + iMessage/Spotify AppleScript.
         if PermissionsBootstrap.currentlyGranted(.automation) {
             startOnce("calendar")     { Task { await CalendarEventSaver.warmAccess() } }
-            startOnce("imessageSend") { Task.detached { IMessageSender.warmAccess() } }
-            startOnce("spotify")      { Task.detached { SpotifyPlayer.warmAccess() } }
+            // Messages and Spotify are deliberately NOT warmed here. Their
+            // warmAccess() asks macOS for Automation consent, and this
+            // branch only knows Calendar is allowed — so it could raise a
+            // system prompt at launch. That consent is requested from the
+            // Permissions row, or in context the first time you send a
+            // message or play something.
         }
     }
 

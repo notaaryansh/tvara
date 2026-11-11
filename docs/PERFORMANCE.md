@@ -297,7 +297,35 @@ Otherwise the keyword fan-out runs directly.
 
 ---
 
-## Memory + RAM budget (steady-state, idle)
+## Memory, measured against other launchers
+
+Measured with `scripts/bench-memory.sh` (which reads `phys_footprint`, the
+number Activity Monitor shows, summed over every process in the app's
+bundle) on an Apple M4 with 16 GB RAM, macOS 27.0, 2026-11-11. Each app
+had been running idle for 4–10 minutes; six samples, ten seconds apart.
+
+| Launcher | Idle footprint |
+|---|---|
+| Alfred 5.8 | 29 MB |
+| tvara | 36 MB |
+| Raycast 2.11 | 57 MB |
+
+tvara's peak footprint over that session was 144 MB, reached while it
+indexed new photos (read from `footprint`'s `phys_footprint_peak`; the
+script itself only samples processes that are already running). Its live
+heap at idle is 11.5 MB.
+
+To reproduce, with all three running:
+
+```bash
+scripts/bench-memory.sh --samples 6 --interval 10
+```
+
+Speed is measured by `scripts/bench-launchers.swift` (time to open the
+panel, time to first result). It needs Accessibility permission for the
+terminal that runs it; no results are recorded here yet.
+
+## Memory + RAM budget (estimate, every source on)
 
 | | Idle RAM |
 |---|---|
@@ -307,8 +335,9 @@ Otherwise the keyword fan-out runs directly.
 | Mail FTS5 + Discord SQLite | +40 MB |
 | **Total typical** | **~370 MB** |
 
-Models unload from RAM when the app is backgrounded for >30 sec — they
-re-load lazily on next query (~500-1000 ms cold).
+The CLIP models are loaded on demand — the text encoder for a photo
+search, the image encoder only while indexing — and are released 60
+seconds after their last use, or at once under memory pressure.
 
 ---
 

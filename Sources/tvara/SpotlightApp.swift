@@ -8,8 +8,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var viewModel: SearchViewModel!
     private var overlayController: WindowSnapOverlayController!
     private var statusItem: NSStatusItem!
-    private var onboardingController: OnboardingWindowController!
-    private var settingsController: SettingsWindowController!
+    /// Built on first use, not at launch: each of these windows hosts a full
+    /// SwiftUI tree (~1.2 MB apiece) and most launches open neither.
+    private lazy var onboardingController: OnboardingWindowController = {
+        let controller = OnboardingWindowController()
+        controller.onDismiss = { [weak self] openSearch in
+            guard let self else { return }
+            self.hasSeenOnboarding = true
+            // Start whatever data services are ALREADY permitted. Nothing here
+            // prompts — startDataServices only warms sources whose permission
+            // is already granted (see SearchViewModel.startDataServices).
+            self.viewModel.startDataServices()
+            // "Open tvara" on the last step does what it says.
+            if openSearch { self.windowController.toggle() }
+        }
+        return controller
+    }()
+
+    /// Granting a permission in Settings re-runs startDataServices so the
+    /// newly-allowed source starts without a relaunch.
+    private lazy var settingsController = SettingsWindowController { [weak self] in
+        self?.viewModel.startDataServices()
+    }
 
     /// Persisted once the user finishes (or dev-skips) onboarding. Until
     /// then the shortcut and the menu-bar "Open tvara" item both lead to
@@ -38,13 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Carbon RegisterEventHotKey, which needs no Accessibility grant, so
         // onboarding is reachable before anything is granted.
 
-        // Use the tvara "t" icon anywhere the app's icon is shown at runtime —
-        // permission dialogs, NSAlerts (e.g. PermissionsBootstrap's "needs
-        // access" popup), the About panel. The bundle already carries
-        // AppIcon.icns; this makes sure the in-process icon matches it too.
-        if let icon = NSImage(named: "AppIcon") {
-            NSApp.applicationIconImage = icon
-        }
+        // The app icon is NOT assigned to NSApp here. A bundled app already
+        // gets it from CFBundleIconFile whenever AppKit needs it (alerts,
+        // permission dialogs); loading the .icns eagerly just kept ~1.6 MB
+        // of bitmaps alive from launch.
 
         // Build the window service ONCE and share between the view model
         // (it owns the captured PID + match/execute) and the overlay
@@ -57,24 +74,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayController = WindowSnapOverlayController(
             viewModel: viewModel, windowService: windowService
         )
-
-        onboardingController = OnboardingWindowController()
-        onboardingController.onDismiss = { [weak self] openSearch in
-            guard let self else { return }
-            self.hasSeenOnboarding = true
-            // Start whatever data services are ALREADY permitted. Nothing here
-            // prompts — startDataServices only warms sources whose permission
-            // is already granted (see SearchViewModel.startDataServices).
-            self.viewModel.startDataServices()
-            // "Open tvara" on the last step does what it says.
-            if openSearch { self.windowController.toggle() }
-        }
-
-        // Settings window. Granting a permission here re-runs startDataServices
-        // so the newly-allowed source starts without a relaunch.
-        settingsController = SettingsWindowController { [weak self] in
-            self?.viewModel.startDataServices()
-        }
 
         // Registers the user's saved shortcut (⌘K until they pick another).
         HotKeyManager.shared.start { [weak self] in
@@ -98,6 +97,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // onboarding right away instead of waiting for a shortcut the
             // user hasn't been told about yet.
             onboardingController.show()
+        }
+
+        HangWatch.startIfRequested()
+
+        // Benchmark hook: `tvara -benchQuery "dog"` runs one search a few
+        // seconds after launch without showing the panel, so
+        // scripts/bench-memory.sh can measure memory in the "just searched"
+        // state without anyone driving the UI. Inert unless the argument
+        // is passed.
+        if let benchQuery = UserDefaults.standard.string(forKey: "benchQuery"),
+           !benchQuery.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.viewModel.query = benchQuery
+            }
         }
     }
 

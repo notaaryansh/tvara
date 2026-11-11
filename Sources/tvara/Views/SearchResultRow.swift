@@ -89,8 +89,8 @@ struct SearchResultRow: View {
             } else {
                 // Fallback for non-image, non-app file rows (and the
                 // brief window on first launch before the app icon
-                // cache has populated). IconCache pre-decodes in the
-                // background so this is usually warm.
+                // cache has populated). IconCache keeps the decoded
+                // image so repeat renders are warm.
                 FileIconView(path: path)
                     .frame(width: 36, height: 36)
             }
@@ -327,10 +327,8 @@ private struct FileIconView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSImageView {
         let view = NSImageView()
         view.imageScaling = .scaleProportionallyUpOrDown
-        // Read through IconCache so paths pre-warmed at launch (every
-        // installed app) render with their bitmap already decoded —
-        // otherwise NSImage's lazy decode happens on first draw and the
-        // icon visibly fills in one frame after the row.
+        // Read through IconCache so a path that's been drawn before
+        // reuses its decoded image instead of decoding again.
         view.image = IconCache.shared.icon(forPath: path)
         return view
     }

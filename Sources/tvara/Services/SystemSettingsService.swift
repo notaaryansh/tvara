@@ -265,34 +265,22 @@ final class SystemSettingsService {
         }
     }
 
-    /// Eagerly resolve `settingsAppIconData` off-main at app launch so
-    /// the first keystroke that hits a Settings pane doesn't trigger
-    /// the underlying icns→TIFF→PNG transcode synchronously on the main
-    /// thread. Measured at ~480 ms cold the first time a query like
-    /// "blu" matched Bluetooth — that's the entire keystroke-lag budget
-    /// gone in one static-let dispatch_once. Mirrors AppSearchService /
-    /// SmartSearchService / etc.; called from SearchViewModel.init.
+    /// Resolve `settingsAppIconData` off-main at app launch, so the first
+    /// keystroke that matches a Settings pane (e.g. "blu" → Bluetooth)
+    /// doesn't pay for the icon render on the main thread. Mirrors
+    /// AppSearchService / SmartSearchService / etc.
     func warmCache() async {
         _ = Self.settingsAppIconData
     }
 
-    /// PNG bytes of the System Settings.app icon. Lazy `static let`, so
-    /// the underlying icns→TIFF→PNG transcode (~480 ms) fires on
-    /// whichever thread reads this first — call `warmCache()` from a
-    /// background Task at launch so the first reader isn't the main
-    /// thread mid-keystroke.
-    private static let settingsAppIconData: Data? = {
-        let icon = NSWorkspace.shared.icon(
-            forFile: "/System/Applications/System Settings.app"
-        )
-        icon.size = NSSize(width: 64, height: 64)
-        guard let tiff = icon.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            return nil
-        }
-        return png
-    }()
+    /// PNG bytes of the System Settings.app icon, rendered at 64px by
+    /// `encodeAppIconPNG`. Lazy `static let`, so the render happens on
+    /// whichever thread reads this first — `warmCache()` makes that a
+    /// background task at launch.
+    private static let settingsAppIconData: Data? =
+        // Shared encoder: renders just the 64px representation instead of
+        // serializing every size in the .icns to TIFF (~40 MB transient).
+        encodeAppIconPNG(path: "/System/Applications/System Settings.app")
 
     /// True when the typed query equals one of our aliases exactly. Used
     /// by the ViewModel's exclusivity rule.

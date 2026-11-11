@@ -45,7 +45,7 @@ actor ImageIndexService {
     /// call (interactive search OR EventBus image worker), so live indexing
     /// and backfill keep the model warm naturally.
     private var idleUnloadTask: Task<Void, Never>?
-    private static let idleTimeout: TimeInterval = 300  // 5 min
+    private static let idleTimeout: TimeInterval = 60
 
     private var memoryPressureSource: DispatchSourceMemoryPressure?
 
@@ -195,7 +195,9 @@ actor ImageIndexService {
     /// background sweep of all scan roots. Cheap to call repeatedly: the
     /// sweep is debounced by `scanLifetime`.
     func warmCache() async {
-        _ = await ensureModels()
+        // Models are NOT loaded here. They cost ~300 MB resident and most
+        // launches never index or search a photo; each path that needs
+        // them calls ensureModels(_:) itself.
         await migrateIfNeeded()
         await sweepIfStale()
     }
@@ -262,7 +264,22 @@ actor ImageIndexService {
     /// those tables. Idempotent — gated by `rrf_backfill_done`.
     private func backfillLabelsAndFTSIfNeeded() async {
         guard let db else { return }
-        guard await ensureModels() else { return }
+        // Nothing to backfill (a new or empty index): finish without
+        // touching the models, so launch stays model-free.
+        var probe: OpaquePointer?
+        let hasRows = sqlite3_prepare_v2(
+            db, "SELECT 1 FROM images WHERE labels_json IS NOT NULL LIMIT 1", -1, &probe, nil
+        ) == SQLITE_OK && sqlite3_step(probe) == SQLITE_ROW
+        sqlite3_finalize(probe)
+        guard hasRows else {
+            setMetaValue("rrf_backfill_done", "1")
+            return
+        }
+        // Rewriting labels embeds each label name (writeImageLabels →
+        // ensureLabel → encodeText), so the text encoder must be loaded.
+        // If it can't be, leave the flag unset and retry next launch rather
+        // than recording labels with no embeddings.
+        guard await ensureModels(.text) else { return }
 
         NSLog("ImageIndexService: one-time backfill of labels + FTS5 for existing rows")
         sqlite3_exec(db, "INSERT INTO images_fts(images_fts) VALUES('rebuild')", nil, nil, nil)
@@ -419,7 +436,11 @@ actor ImageIndexService {
             }
             return false
         }
-        guard await ensureModels(),
+        // Nothing indexed → nothing to rank; don't load a model to learn that.
+        guard hasIndexedImages() else { return [] }
+        // Queries only need the text encoder; the image encoder stays
+        // unloaded unless an indexing pass asks for it.
+        guard await ensureModels(.text),
               let qVec = encodeText(trimmed) else { return [] }
         mark("encodeText")
         guard let db else { return [] }
@@ -788,21 +809,15 @@ actor ImageIndexService {
 
     // MARK: - Model loading
 
-    /// True if both CoreML models loaded successfully. Cached after first call.
-    /// Every call resets the idle-unload timer so any active workload
-    /// (search burst, EventBus indexing batch, backfill sweep) keeps the
-    /// model warm until `idleTimeout` after the last use.
-    private func ensureModels() async -> Bool {
-        if clipImage != nil && clipText != nil && tokenizer != nil {
-            scheduleIdleUnload()
-            return true
-        }
-        guard let imgURL = Bundle.tvaraResources.url(forResource: "mobileclip_s2_image", withExtension: "mlmodelc", subdirectory: "Models"),
-              let txtURL = Bundle.tvaraResources.url(forResource: "mobileclip_s2_text",  withExtension: "mlmodelc", subdirectory: "Models")
-        else {
-            NSLog("ImageIndexService: MobileCLIP models not found in bundle")
-            return false
-        }
+    /// Which encoders a caller needs. Search only encodes text; indexing
+    /// encodes images (and text, for label vectors).
+    private enum ModelNeed { case text, all }
+
+    /// Load whatever `need` requires that isn't loaded yet. Every call
+    /// resets the idle-unload timer so any active workload (search burst,
+    /// EventBus indexing batch, backfill sweep) keeps its models warm
+    /// until `idleTimeout` after the last use.
+    private func ensureModels(_ need: ModelNeed = .all) async -> Bool {
         // Indexing path: prefer CPU+GPU over ANE. ANE has thrown
         // NSGenericException on a specific user image (HEIC with unusual
         // color profile / 16-bit components) which Swift `try?` cannot
@@ -811,15 +826,44 @@ actor ImageIndexService {
         // shape Vision can decode.
         let cfg = MLModelConfiguration(); cfg.computeUnits = .cpuAndGPU
         do {
-            self.clipImage = try MLModel(contentsOf: imgURL, configuration: cfg)
-            self.clipText  = try MLModel(contentsOf: txtURL, configuration: cfg)
-            self.tokenizer = CLIPTokenizer()
+            if clipText == nil || tokenizer == nil {
+                guard let txtURL = Bundle.tvaraResources.url(
+                    forResource: "mobileclip_s2_text", withExtension: "mlmodelc",
+                    subdirectory: "Models"
+                ) else {
+                    NSLog("ImageIndexService: MobileCLIP text model not found in bundle")
+                    return false
+                }
+                self.clipText  = try MLModel(contentsOf: txtURL, configuration: cfg)
+                self.tokenizer = CLIPTokenizer()
+            }
+            if need == .all, clipImage == nil {
+                guard let imgURL = Bundle.tvaraResources.url(
+                    forResource: "mobileclip_s2_image", withExtension: "mlmodelc",
+                    subdirectory: "Models"
+                ) else {
+                    NSLog("ImageIndexService: MobileCLIP image model not found in bundle")
+                    return false
+                }
+                self.clipImage = try MLModel(contentsOf: imgURL, configuration: cfg)
+            }
             scheduleIdleUnload()
             return true
         } catch {
             NSLog("ImageIndexService: failed to load CoreML models: \(error)")
             return false
         }
+    }
+
+    /// True when at least one image has an embedding to search against.
+    private func hasIndexedImages() -> Bool {
+        guard let db else { return false }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(
+            db, "SELECT 1 FROM images WHERE embedding IS NOT NULL LIMIT 1", -1, &stmt, nil
+        ) == SQLITE_OK else { return false }
+        return sqlite3_step(stmt) == SQLITE_ROW
     }
 
     /// (Re)arm the deferred unload. Each call cancels the previous pending
@@ -878,13 +922,19 @@ actor ImageIndexService {
     }
 
     private func sweepNow() async {
-        guard await ensureModels() else { return }
         let files = enumerate(roots: scanRoots)
         let newOrChanged = files.filter { needsIndex($0) }
         if newOrChanged.isEmpty { return }
+        // Only pay for the models once we know there is work to do.
+        guard await ensureModels() else { return }
         NSLog("ImageIndexService: indexing \(newOrChanged.count) image(s)")
         var done = 0
         for url in newOrChanged {
+            // Re-check before every image, not once per sweep: the loop
+            // yields, so on a long sweep the idle timer (or a memory-pressure
+            // unload) can drop the models underneath it. This reloads them
+            // if needed and pushes the idle timer back.
+            guard await ensureModels() else { break }
             indexOne(url)
             done += 1
             // Yield every image so search() calls (which run on the same
@@ -947,8 +997,8 @@ actor ImageIndexService {
         let url = URL(fileURLWithPath: path)
         guard allowedExts.contains(url.pathExtension.lowercased()) else { return }
         guard FileManager.default.fileExists(atPath: path) else { return }
-        guard await ensureModels() else { return }
         guard needsIndex(url) else { return }
+        guard await ensureModels() else { return }
         indexOne(url)
     }
 
@@ -963,6 +1013,10 @@ actor ImageIndexService {
               cg.bitsPerComponent <= 8 else {
             return
         }
+        // Without the encoder there is nothing worth storing: a row with
+        // an empty embedding and a current mtime would count as indexed and
+        // never be retried. Leave the file for the next pass instead.
+        guard clipImage != nil else { return }
         let v = runVision(on: cg)
         let emb = encodeImage(cg) ?? []
         upsert(path: url.path,

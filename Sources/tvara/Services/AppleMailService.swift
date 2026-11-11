@@ -255,6 +255,11 @@ actor AppleMailService {
 
     private func runBootstrap() async {
         let alreadyIndexed = loadIndexedFiles()
+        // That full-table scan leaves several MB in SQLite's page cache
+        // that nothing reads again. Hand it back. (Guarded: the handle is
+        // nil when the index failed to open, and this call doesn't accept
+        // a nil connection.)
+        if let db { sqlite3_db_release_memory(db) }
         let mailBase = self.mailBase
 
         let parsed: [IndexedMailRow] = await Task.detached(priority: .utility) {
