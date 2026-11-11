@@ -106,6 +106,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // scripts/bench-memory.sh can measure memory in the "just searched"
         // state without anyone driving the UI. Inert unless the argument
         // is passed.
+        // `tvara -openPanel YES` shows the search panel right after launch,
+        // without waiting for the shortcut. Handy for demos and for looking
+        // at a fresh build; combine with -benchQuery to open it with results.
+        if UserDefaults.standard.bool(forKey: "openPanel"), hasSeenOnboarding {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.windowController.toggle()
+            }
+        }
+
         if let benchQuery = UserDefaults.standard.string(forKey: "benchQuery"),
            !benchQuery.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
