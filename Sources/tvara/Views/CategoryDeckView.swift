@@ -68,29 +68,42 @@ struct CategoryDeckView: View {
 /// category is one app's content, otherwise a plain symbol.
 enum CategoryIcon {
     case app(NSImage)
-    case symbol(String)
+    /// A white glyph on a coloured rounded square, drawn like the icons in
+    /// the System Settings sidebar. For categories no app stands for.
+    case tile(symbol: String, color: Color)
 
     init(_ tab: SearchTab) {
         switch tab {
         case .mail:      self = .app(Self.mail)
         case .notes:     self = .app(Self.notes)
         case .messages:  self = .app(Self.messages)
-        case .apps:      self = .symbol("square.grid.2x2")
-        case .files:     self = .symbol("folder")
-        case .images:    self = .symbol("photo")
-        case .clipboard: self = .symbol("doc.on.clipboard")
-        case .all:       self = .symbol("magnifyingglass")
+        case .apps:      self = .app(Self.apps)
+        case .files:     self = .app(Self.finder)
+        case .images:    self = .app(Self.photos)
+        case .clipboard: self = .tile(symbol: "list.clipboard.fill", color: .orange)
+        case .all:       self = .tile(symbol: "magnifyingglass", color: .gray)
         }
     }
 
     // Resolved on first use (the first time the menu is opened), then kept:
-    // three small icons, never loaded at launch.
+    // a handful of small icons, never loaded at launch.
     private static let mail = RowRendering.appIcon(
         bundleID: "com.apple.mail", fallbackPath: "/System/Applications/Mail.app")
     private static let notes = RowRendering.appIcon(
         bundleID: "com.apple.Notes", fallbackPath: "/System/Applications/Notes.app")
     private static let messages = RowRendering.appIcon(
         bundleID: "com.apple.MobileSMS", fallbackPath: "/System/Applications/Messages.app")
+    private static let finder = RowRendering.appIcon(
+        bundleID: "com.apple.finder", fallbackPath: "/System/Library/CoreServices/Finder.app")
+    private static let photos = RowRendering.appIcon(
+        bundleID: "com.apple.Photos", fallbackPath: "/System/Applications/Photos.app")
+    /// The system app launcher: "Apps" on macOS 26+, Launchpad before it.
+    private static let apps: NSImage = {
+        let modern = "/System/Applications/Apps.app"
+        let path = FileManager.default.fileExists(atPath: modern)
+            ? modern : "/System/Applications/Launchpad.app"
+        return NSWorkspace.shared.icon(forFile: path)
+    }()
 }
 
 /// One line of the category menu. Takes plain values so it can be laid out
@@ -147,10 +160,17 @@ struct CategoryRow: View {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
-        case .symbol(let name):
-            Image(systemName: name)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(.secondary)
+        case .tile(let symbol, let color):
+            // Inset to the same visible size as an app icon, which carries
+            // its own margin inside the 28pt slot.
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(color.gradient)
+                .overlay(
+                    Image(systemName: symbol)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                )
+                .padding(2.5)
         }
     }
 }
