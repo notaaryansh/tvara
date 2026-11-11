@@ -23,9 +23,8 @@ history from the same box you launch apps from.
 as your keystroke. Most other sources answer in 10–70 ms, and results
 stream in as each one returns, so you never wait on the slowest.
 
-**It's light.** tvara idles at about 150 MB with every source switched
-on. Photo search loads its models only when you search photos and
-frees them after five minutes.
+**It's light.** tvara idles at about 65 MB. Photo search loads its
+model only when you search photos and frees it a minute later.
 
 Per-source numbers and how they were measured are in
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md).

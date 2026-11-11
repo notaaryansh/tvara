@@ -281,18 +281,10 @@ final class SystemSettingsService {
     /// whichever thread reads this first — call `warmCache()` from a
     /// background Task at launch so the first reader isn't the main
     /// thread mid-keystroke.
-    private static let settingsAppIconData: Data? = {
-        let icon = NSWorkspace.shared.icon(
-            forFile: "/System/Applications/System Settings.app"
-        )
-        icon.size = NSSize(width: 64, height: 64)
-        guard let tiff = icon.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else {
-            return nil
-        }
-        return png
-    }()
+    private static let settingsAppIconData: Data? =
+        // Shared encoder: renders just the 64px representation instead of
+        // serializing every size in the .icns to TIFF (~40 MB transient).
+        encodeAppIconPNG(path: "/System/Applications/System Settings.app")
 
     /// True when the typed query equals one of our aliases exactly. Used
     /// by the ViewModel's exclusivity rule.

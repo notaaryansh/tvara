@@ -99,6 +99,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // user hasn't been told about yet.
             onboardingController.show()
         }
+
+        // Benchmark hook: `tvara -benchQuery "dog"` runs one search a few
+        // seconds after launch without showing the panel, so
+        // scripts/bench-memory.sh can measure memory in the "just searched"
+        // state without anyone driving the UI. Inert unless the argument
+        // is passed.
+        if let benchQuery = UserDefaults.standard.string(forKey: "benchQuery"),
+           !benchQuery.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.viewModel.query = benchQuery
+            }
+        }
     }
 
     /// Persistent menu-bar presence. Clicking the "t" drops a menu — the user

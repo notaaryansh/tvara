@@ -297,7 +297,42 @@ Otherwise the keyword fan-out runs directly.
 
 ---
 
-## Memory + RAM budget (steady-state, idle)
+## Memory, measured
+
+Measured with `scripts/bench-memory.sh` (which reads `phys_footprint`, the
+number Activity Monitor shows) on an Apple M4 with 16 GB RAM, macOS 27.0,
+release build, 2026-11-11.
+
+| State | Footprint |
+|---|---|
+| Idle after launch, warm icon cache | 42 MB |
+| Idle after a search (`-benchQuery "screenshot"`) | 64 MB |
+| Peak during that run | 75 MB |
+| Cold icon cache (first launch), settled | 145 MB |
+| Cold icon cache, peak | 269 MB |
+
+**Scope of these numbers.** Full Disk Access was NOT granted to the build
+that was measured, so Mail, Messages, WhatsApp, Notes and photo search
+were off. Apps, files, Discord, clipboard, settings and window commands
+were on. The figure with every source on still needs measuring; the table
+below is the older estimate for that case.
+
+Before the 2026-11 fix, a cold icon cache peaked above 9 GB: each app icon
+was serialized to an uncompressed TIFF of every size in its `.icns`
+(~35 MB) inside a loop that never drained them.
+
+To reproduce:
+
+```bash
+scripts/build-app.sh
+open -g ./tvara.app --args -benchQuery "screenshot"
+scripts/bench-memory.sh --samples 12 --interval 10 --detail
+```
+
+`scripts/bench-memory.sh` also reports Raycast, Alfred and Spotlight when
+they are running, for a side-by-side table.
+
+## Memory + RAM budget (estimate, every source on)
 
 | | Idle RAM |
 |---|---|
@@ -307,8 +342,9 @@ Otherwise the keyword fan-out runs directly.
 | Mail FTS5 + Discord SQLite | +40 MB |
 | **Total typical** | **~370 MB** |
 
-Models unload from RAM when the app is backgrounded for >30 sec — they
-re-load lazily on next query (~500-1000 ms cold).
+The CLIP models are loaded on demand — the text encoder for a photo
+search, the image encoder only while indexing — and are released 60
+seconds after their last use, or at once under memory pressure.
 
 ---
 

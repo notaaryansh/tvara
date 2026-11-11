@@ -171,30 +171,45 @@ struct CachedIcon: Sendable {
 
 /// Render an app icon to PNG bytes at `maxDim × maxDim`. Safe to call
 /// off the main actor — `NSWorkspace.shared.icon(forFile:)` is
-/// documented thread-safe and ImageIO's thumbnail path runs on the
-/// calling thread without GUI dependencies.
+/// documented thread-safe and the CoreGraphics path below has no GUI
+/// dependencies.
+///
+/// Memory matters here: this runs once per installed app on a cold
+/// cache (i.e. every first launch). It used to go through
+/// `icon.tiffRepresentation`, which serializes EVERY size in the .icns
+/// uncompressed (~35 MB per app), and the caller's loop never drained
+/// those autoreleased buffers — ~300 apps peaked above 9 GB. Now it asks
+/// for just the representation nearest the target size, draws that into
+/// a `maxDim`-pixel bitmap, and wraps the work in its own autorelease
+/// pool so nothing outlives the call.
 func encodeAppIconPNG(path: String, maxDim: CGFloat = AppIconStore.pngMaxDim) -> Data? {
-    let icon = NSWorkspace.shared.icon(forFile: path)
-    guard let tiff = icon.tiffRepresentation,
-          let src = CGImageSourceCreateWithData(tiff as CFData, nil) else {
-        return nil
+    autoreleasepool {
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        var proposed = CGRect(x: 0, y: 0, width: maxDim, height: maxDim)
+        guard let source = icon.cgImage(
+            forProposedRect: &proposed, context: nil, hints: nil
+        ) else { return nil }
+
+        let px = max(Int(maxDim.rounded()), 1)
+        guard let ctx = CGContext(
+            data: nil, width: px, height: px,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(source, in: CGRect(x: 0, y: 0, width: px, height: px))
+        guard let thumb = ctx.makeImage() else { return nil }
+
+        let dest = NSMutableData()
+        let pngType = UTType.png.identifier as CFString
+        guard let dst = CGImageDestinationCreateWithData(dest, pngType, 1, nil) else {
+            return nil
+        }
+        CGImageDestinationAddImage(dst, thumb, nil)
+        guard CGImageDestinationFinalize(dst) else { return nil }
+        return dest as Data
     }
-    let opts: [CFString: Any] = [
-        kCGImageSourceCreateThumbnailFromImageAlways: true,
-        kCGImageSourceThumbnailMaxPixelSize: maxDim,
-        kCGImageSourceCreateThumbnailWithTransform: true,
-    ]
-    guard let thumb = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else {
-        return nil
-    }
-    let dest = NSMutableData()
-    let pngType = UTType.png.identifier as CFString
-    guard let dst = CGImageDestinationCreateWithData(dest, pngType, 1, nil) else {
-        return nil
-    }
-    CGImageDestinationAddImage(dst, thumb, nil)
-    guard CGImageDestinationFinalize(dst) else { return nil }
-    return dest as Data
 }
 
 /// Best-effort bundle mtime used as the cache freshness key. App
