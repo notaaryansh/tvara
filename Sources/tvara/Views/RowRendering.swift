@@ -102,6 +102,26 @@ enum RowRendering {
         return AttributedString(base)
     }
 
+    // MARK: - Selection highlight
+
+    /// The one selection treatment for every list in the panel: result
+    /// rows, compact message rows, "see more", the photo strip and the
+    /// category menu. A soft neutral lift, the way macOS menus highlight —
+    /// not a tinted slab. A plain fill: no material, shadow or border, so
+    /// moving the selection costs nothing to draw.
+    static let selectionFill = Color.white.opacity(0.12)
+    static let selectionCornerRadius: CGFloat = 10
+    /// Gap between the highlight and the panel edge.
+    static let selectionInset: CGFloat = 6
+
+    /// Background for a selectable row. Always present (clear when not
+    /// selected) so row geometry never changes with selection.
+    static func selectionBackground(_ isSelected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: selectionCornerRadius, style: .continuous)
+            .fill(isSelected ? selectionFill : Color.clear)
+            .padding(.horizontal, selectionInset)
+    }
+
     // MARK: - Platform badge icons
 
     /// Icon for a platform badge, resolved by bundle ID first so apps

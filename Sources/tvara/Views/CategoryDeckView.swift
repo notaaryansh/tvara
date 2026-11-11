@@ -1,22 +1,31 @@
+import AppKit
 import SwiftUI
 
-/// Tab → deck. Vertical stack of category cards (Apps / Files / Messages
-/// / Mail / Notes / Images / Clipboard) — one card per non-empty source.
-/// Each card shows the count and a preview of the top hit. ↑/↓ navigates
-/// cards; Enter zooms into the highlighted category; Esc pops back to the
-/// blended list.
+/// Tab → category menu. One compact row per non-empty source (Apps / Files
+/// / Messages / Mail / Notes / Images / Clipboard): its icon, its name, a
+/// preview of the top hit, and how many results it holds. ↑/↓ moves;
+/// Enter zooms into the highlighted category; Esc pops back to the blended
+/// list.
+///
+/// Deliberately the same grammar as the result list — same row padding,
+/// same type sizes, same selection highlight — so it reads as another view
+/// of the results rather than a separate screen.
 struct CategoryDeckView: View {
     @ObservedObject var viewModel: SearchViewModel
 
     var body: some View {
         let cards = viewModel.categoryCards
+        let selected = clamped(viewModel.selectedCardIndex, cards.count)
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 0) {
                     ForEach(Array(cards.enumerated()), id: \.element.id) { idx, card in
-                        CategoryDeckCard(
-                            card: card,
-                            isSelected: idx == clamped(viewModel.selectedCardIndex, cards.count)
+                        CategoryRow(
+                            title: card.tab.label,
+                            preview: card.topPreview.map(Self.previewText),
+                            count: card.count,
+                            icon: CategoryIcon(card.tab),
+                            isSelected: idx == selected
                         )
                         .id(card.id)
                         .onTapGesture {
@@ -25,8 +34,7 @@ struct CategoryDeckView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 10)
+                .padding(.vertical, 6)
             }
             .frame(maxHeight: 440)
             .onChange(of: viewModel.selectedCardIndex) { _, newIdx in
@@ -42,89 +50,11 @@ struct CategoryDeckView: View {
         guard count > 0 else { return 0 }
         return min(max(idx, 0), count - 1)
     }
-}
 
-private struct CategoryDeckCard: View {
-    let card: SearchViewModel.CategoryCard
-    let isSelected: Bool
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            iconBadge
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(card.tab.label)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text("\(card.count)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule().fill(Color.white.opacity(0.08))
-                        )
-                }
-                if let preview = card.topPreview {
-                    Text(previewText(preview))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(
-                    isSelected
-                        ? Color.accentColor.opacity(0.22)
-                        : Color.white.opacity(0.04)
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(
-                    isSelected
-                        ? Color.accentColor.opacity(0.55)
-                        : Color.white.opacity(0.08),
-                    lineWidth: 1
-                )
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var tint: Color { tabTint(card.tab) }
-
-    private var iconBadge: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [tint.opacity(0.95), tint.opacity(0.65)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .frame(width: 42, height: 42)
-            Image(systemName: card.tab.icon)
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-    }
-
-    private func previewText(_ r: SearchResult) -> String {
-        // For an app the title alone reads cleanly. For messages the
-        // subtitle is the message body, which is what the user is
-        // actually trying to find — surface it.
+    /// For an app the title alone reads cleanly. For messages the subtitle
+    /// is the message body, which is what the user is actually trying to
+    /// find — surface it.
+    private static func previewText(_ r: SearchResult) -> String {
         let body = r.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = r.displayTitle
         if !body.isEmpty && body != title {
@@ -134,17 +64,93 @@ private struct CategoryDeckCard: View {
     }
 }
 
-/// Tints align with the existing `SearchResult.Source.tint` palette so a
-/// deck card and the rows it zooms into share the same color identity.
-private func tabTint(_ tab: SearchTab) -> Color {
-    switch tab {
-    case .all:       return Color(red: 0.55, green: 0.55, blue: 0.62)
-    case .messages:  return Color(red: 0.16, green: 0.72, blue: 0.35)
-    case .mail:      return Color(red: 0.16, green: 0.45, blue: 0.95)
-    case .apps:      return Color(red: 0.55, green: 0.40, blue: 0.95)
-    case .files:     return Color(red: 0.30, green: 0.62, blue: 0.95)
-    case .images:    return Color(red: 0.93, green: 0.55, blue: 0.20)
-    case .clipboard: return Color(red: 0.55, green: 0.55, blue: 0.60)
-    case .notes:     return Color(red: 0.98, green: 0.78, blue: 0.27)
+/// What a category shows in its icon slot: the real app's icon when the
+/// category is one app's content, otherwise a plain symbol.
+enum CategoryIcon {
+    case app(NSImage)
+    case symbol(String)
+
+    init(_ tab: SearchTab) {
+        switch tab {
+        case .mail:      self = .app(Self.mail)
+        case .notes:     self = .app(Self.notes)
+        case .messages:  self = .app(Self.messages)
+        case .apps:      self = .symbol("square.grid.2x2")
+        case .files:     self = .symbol("folder")
+        case .images:    self = .symbol("photo")
+        case .clipboard: self = .symbol("doc.on.clipboard")
+        case .all:       self = .symbol("magnifyingglass")
+        }
+    }
+
+    // Resolved on first use (the first time the menu is opened), then kept:
+    // three small icons, never loaded at launch.
+    private static let mail = RowRendering.appIcon(
+        bundleID: "com.apple.mail", fallbackPath: "/System/Applications/Mail.app")
+    private static let notes = RowRendering.appIcon(
+        bundleID: "com.apple.Notes", fallbackPath: "/System/Applications/Notes.app")
+    private static let messages = RowRendering.appIcon(
+        bundleID: "com.apple.MobileSMS", fallbackPath: "/System/Applications/Messages.app")
+}
+
+/// One line of the category menu. Takes plain values so it can be laid out
+/// and checked without a view model.
+struct CategoryRow: View {
+    let title: String
+    let preview: String?
+    let count: Int
+    let icon: CategoryIcon
+    let isSelected: Bool
+
+    /// Same slot as the avatar in a compact message row.
+    private static let iconSize: CGFloat = 28
+    /// Fixed so every row's preview starts at the same x.
+    private static let titleWidth: CGFloat = 86
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            iconView
+                .frame(width: Self.iconSize, height: Self.iconSize)
+
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .frame(width: Self.titleWidth, alignment: .leading)
+
+            Text(preview ?? "")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("\(count)")
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                // Fixed column, so every preview stops at the same edge.
+                .frame(minWidth: 30, alignment: .trailing)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(RowRendering.selectionBackground(isSelected))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(count) \(count == 1 ? "result" : "results")")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    @ViewBuilder
+    private var iconView: some View {
+        switch icon {
+        case .app(let image):
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+        case .symbol(let name):
+            Image(systemName: name)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(.secondary)
+        }
     }
 }

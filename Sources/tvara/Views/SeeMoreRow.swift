@@ -19,11 +19,7 @@ struct SeeMoreRow: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
-                .padding(.horizontal, 6)
-        )
+        .background(RowRendering.selectionBackground(isSelected))
         .contentShape(Rectangle())
     }
 }

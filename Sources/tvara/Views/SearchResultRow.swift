@@ -42,11 +42,7 @@ struct SearchResultRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.28) : Color.clear)
-                .padding(.horizontal, 6)
-        )
+        .background(RowRendering.selectionBackground(isSelected))
         .contentShape(Rectangle())
         // Subtle visual treatment for fuzzy results so the user can
         // tell at a glance that "Did you mean?" results are below the

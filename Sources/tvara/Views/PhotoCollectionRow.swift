@@ -35,11 +35,7 @@ struct PhotoCollectionRow: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSelected && selectedThumbIndex == nil
-                      ? Color.accentColor.opacity(0.28)
-                      : Color.clear)
-                .padding(.horizontal, 6)
+            RowRendering.selectionBackground(isSelected && selectedThumbIndex == nil)
         )
         .contentShape(Rectangle())
         .onTapGesture { onTapRow() }
@@ -104,7 +100,7 @@ struct PhotoCollectionRow: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .strokeBorder(
                     isThumbSelected
-                        ? Color.accentColor
+                        ? Color.white.opacity(0.9)
                         : Color.white.opacity(0.12),
                     lineWidth: isThumbSelected ? 2 : 0.5
                 )
