@@ -54,15 +54,17 @@ enum FuzzyMatch {
     }
 
     /// Distance budget chosen by query length:
-    ///   ≤3 chars  → 0  (no fuzzy — would match random short strings)
-    ///   4 chars   → 1  (one realistic typo, no more)
-    ///   5+ chars  → 2  (covers most double-typo realistic cases)
+    ///   ≤3 chars   → 0  (no fuzzy — would match random short strings)
+    ///   4–6 chars  → 1  (one realistic typo, no more)
+    ///   7+ chars   → 2  (covers most double-typo realistic cases)
+    /// Two edits in a 5-letter word is 40% of it: "drish" reached both
+    /// "trash" and "wish". Short words get one edit.
     /// Capped at 2 — anything looser blurs into loosely-related strings,
     /// which is the "aldjasfjsafd routes to a real command" failure mode.
     static func budget(for query: String) -> Int {
         switch query.count {
         case 0...3: return 0
-        case 4:     return 1
+        case 4...6: return 1
         default:    return 2
         }
     }

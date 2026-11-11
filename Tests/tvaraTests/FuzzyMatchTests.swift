@@ -61,7 +61,14 @@ final class FuzzyMatchTests: XCTestCase {
     }
 
     func testBudgetIsTwoForLongerQueries() {
-        XCTAssertEqual(FuzzyMatch.budget(for: "abcde"), 2)
+        XCTAssertEqual(FuzzyMatch.budget(for: "abcde"), 1)
+        XCTAssertEqual(FuzzyMatch.budget(for: "abcdef"), 1)
+        XCTAssertEqual(FuzzyMatch.budget(for: "abcdefg"), 2)
+        // "drish" must not fuzzy-match "trash" or "wish".
+        XCTAssertNil(FuzzyMatch.levenshtein(
+            "drish", "trash", budget: FuzzyMatch.budget(for: "drish")))
+        XCTAssertNil(FuzzyMatch.levenshtein(
+            "drish", "wish", budget: FuzzyMatch.budget(for: "drish")))
         XCTAssertEqual(FuzzyMatch.budget(for: "abcdefghij"), 2)
     }
 }
