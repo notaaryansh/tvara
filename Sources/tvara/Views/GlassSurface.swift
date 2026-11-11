@@ -15,9 +15,10 @@ struct GlassSurface<S: InsettableShape>: ViewModifier {
     /// Optional glass tint (26+). Ignored on the fallback path.
     var tint: Color? = nil
     /// Use the clear glass variant (26+): fully see-through, without the
-    /// dimming layer regular glass puts behind content. Ignored on the
-    /// fallback path.
-    var clear: Bool = false
+    /// dimming layer regular glass puts behind content. On by default, so
+    /// every surface in the app (panels, key caps, pills, cards) is the
+    /// same clear glass. Ignored on the fallback path.
+    var clear: Bool = true
     /// Reacts to cursor/press with live specular movement (26+). No-op on
     /// the fallback path.
     var interactive: Bool = false
@@ -122,7 +123,7 @@ extension View {
     func glassSurface(
         cornerRadius: CGFloat,
         tint: Color? = nil,
-        clear: Bool = false,
+        clear: Bool = true,
         interactive: Bool = false,
         frost: Double = 0.0,
         grain: Double = 0.0,
@@ -143,6 +144,7 @@ extension View {
     /// chips. Interactive by default since pills are almost always tappable.
     func glassCapsule(
         tint: Color? = nil,
+        clear: Bool = true,
         interactive: Bool = true,
         fallbackMaterial: NSVisualEffectView.Material = .hudWindow,
         fallbackFill: Double = 0.0,
@@ -150,7 +152,7 @@ extension View {
     ) -> some View {
         modifier(GlassSurface(
             shape: Capsule(style: .continuous),
-            tint: tint, interactive: interactive,
+            tint: tint, clear: clear, interactive: interactive,
             fallbackMaterial: fallbackMaterial,
             fallbackFill: fallbackFill, fallbackStroke: fallbackStroke
         ))
