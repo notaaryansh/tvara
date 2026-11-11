@@ -31,21 +31,28 @@ struct SearchView: View {
                 Divider().opacity(0.25)
                 ComposeView(viewModel: viewModel)
             } else if viewModel.actingOn != nil {
-                Divider().opacity(0.20)
-                actingFooter
+                footer
             } else if hasQuery {
                 Divider().opacity(0.25)
                 if viewModel.isAIThinking || viewModel.aiExplanation != nil {
                     aiBanner
                 }
                 resultsArea
-                if viewModel.viewMode != .blended || !viewModel.categoryCards.isEmpty {
-                    statusFooter
-                }
+                footer
+            } else if !viewModel.query.isEmpty {
+                // One or two letters typed: nothing is searched yet, so say
+                // so instead of leaving the panel looking unresponsive.
+                footer
             }
         }
         .frame(width: bubbleWidth)
-        .glassSurface(cornerRadius: 16)
+        // Full glass: the clear variant, with no tint and no dimming layer,
+        // so the panel is glass all the way through.
+        // The panel is the one surface on regular glass rather than clear:
+        // regular glass diffuses what is behind it, so text from the window
+        // underneath can't be read through the results. The tint is in the
+        // glass itself (not a layer over it) and deepens it a little.
+        .glassSurface(cornerRadius: 16, tint: Color.black.opacity(0.3), clear: false)
         .padding(.top, 4)
         // Single binary mode token drives the bubble's resize. Each
         // discrete mode (no query, results-pending, results-shown,
@@ -104,6 +111,10 @@ struct SearchView: View {
                 .font(.system(size: 20, weight: .regular))
                 .foregroundStyle(isActing ? Color.purple.opacity(0.85) : Color.secondary)
 
+            if let scope = scopeChip {
+                ScopeChip(symbol: scope.symbol, label: scope.label)
+            }
+
             TextField(searchBarPlaceholder, text: $viewModel.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
@@ -126,7 +137,17 @@ struct SearchView: View {
 
     private var searchBarPlaceholder: String {
         if isActing { return "Tell me what to do with this…" }
-        return ""
+        return "Search apps, messages, files…"
+    }
+
+    /// The level below "all results" that the panel is in, if any.
+    private var scopeChip: (symbol: String, label: String)? {
+        guard !isActing, viewModel.composeState == nil, hasQuery else { return nil }
+        switch viewModel.viewMode {
+        case .blended: return nil
+        case .deck:    return ("square.grid.2x2", "Categories")
+        case .zoomed:  return (viewModel.activeTab.icon, viewModel.activeTab.label)
+        }
     }
 
     /// iMessage-reply-pill style above the search field. Slim left accent
@@ -170,37 +191,62 @@ struct SearchView: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
-        .background(Color.white.opacity(0.025))
     }
 
-    /// Thin status-bar style footer under the input when acting, showing
-    /// the keyboard hints in a quiet way (no gradient, no shouting).
-    private var actingFooter: some View {
-        HStack(spacing: 14) {
-            shortcutHint(key: "⏎", label: "submit")
-            shortcutHint(key: "esc", label: "cancel")
-            Spacer()
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.02))
+    /// The one footer every level shares: what the list shows on the left,
+    /// what the keys do right now on the right.
+    private var footer: some View {
+        PanelFooter(
+            location: footerLocation.label,
+            count: footerLocation.count,
+            isLoading: viewModel.isLoading && !isActing,
+            hints: footerHints
+        )
     }
 
-    private func shortcutHint(key: String, label: String) -> some View {
-        HStack(spacing: 5) {
-            Text(key)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
-                )
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+    private var footerLocation: (label: String, count: Int?) {
+        if isActing { return ("Acting on selection", nil) }
+        guard hasQuery else { return ("Keep typing to search", nil) }
+        switch viewModel.viewMode {
+        case .blended: return ("All results", viewModel.results.count)
+        case .deck:    return ("Categories", viewModel.categoryCards.count)
+        case .zoomed:  return (viewModel.activeTab.label, viewModel.results.count)
         }
+    }
+
+    private var footerHints: [KeyHint] {
+        if isActing {
+            return [KeyHint(key: "↩", label: "Submit"), KeyHint(key: "esc", label: "Cancel")]
+        }
+        guard hasQuery else { return [KeyHint(key: "esc", label: "Clear")] }
+
+        let hasCategories = !viewModel.categoryCards.isEmpty
+        var hints: [KeyHint] = []
+        switch viewModel.viewMode {
+        case .blended:
+            if let selected = selectedResult {
+                hints.append(KeyHint(key: "↩", label: selected.primaryActionLabel))
+            }
+            if hasCategories { hints.append(KeyHint(key: "⇥", label: "Categories")) }
+            hints.append(KeyHint(key: "esc", label: "Clear"))
+        case .deck:
+            hints.append(KeyHint(key: "↩", label: "Open category"))
+            hints.append(KeyHint(key: "⇥", label: "All results"))
+            hints.append(KeyHint(key: "esc", label: "Back"))
+        case .zoomed:
+            if let selected = selectedResult {
+                hints.append(KeyHint(key: "↩", label: selected.primaryActionLabel))
+            }
+            hints.append(KeyHint(key: "⇥", label: "Categories"))
+            hints.append(KeyHint(key: "esc", label: "Back"))
+        }
+        return hints
+    }
+
+    private var selectedResult: SearchResult? {
+        let results = viewModel.results
+        guard results.indices.contains(viewModel.selectedIndex) else { return nil }
+        return results[viewModel.selectedIndex]
     }
 
     /// Three discrete renderings driven by viewModel.viewMode. Wrapped in
@@ -212,7 +258,6 @@ struct SearchView: View {
         case .deck:
             CategoryDeckView(viewModel: viewModel)
         case .zoomed:
-            zoomedHeader
             if !viewModel.results.isEmpty {
                 resultsList
             } else if !viewModel.isLoading && !viewModel.isAIThinking {
@@ -225,49 +270,6 @@ struct SearchView: View {
                 emptyState
             }
         }
-    }
-
-    /// Slim header when zoomed into a single category. Mirrors the
-    /// active card so the user sees "I'm inside Messages" with the same
-    /// icon + tint they tapped on in the deck.
-    private var zoomedHeader: some View {
-        HStack(spacing: 10) {
-            Image(systemName: viewModel.activeTab.icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text(viewModel.activeTab.label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(.secondary)
-            Text("\(viewModel.results.count)")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 7)
-        .background(Color.white.opacity(0.03))
-    }
-
-    /// Bottom status bar — shows the relevant keyboard hint for the
-    /// current view mode. Replaces the old "⇥ to switch" tab-strip text.
-    private var statusFooter: some View {
-        HStack(spacing: 12) {
-            switch viewModel.viewMode {
-            case .blended:
-                shortcutHint(key: "⇥", label: "categories")
-            case .deck:
-                shortcutHint(key: "↩", label: "open")
-                shortcutHint(key: "esc", label: "back")
-            case .zoomed:
-                shortcutHint(key: "↩", label: "open")
-                shortcutHint(key: "esc", label: "back to categories")
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 6)
-        .background(Color.white.opacity(0.02))
     }
 
     private var resultsList: some View {
@@ -349,8 +351,7 @@ struct SearchView: View {
 
     /// Slim section title above each group. Calm, secondary-tinted,
     /// small enough that it reads as chrome and doesn't compete with
-    /// the row content. Mirrors the zoomedHeader style so navigating
-    /// blended → zoomed feels visually continuous.
+    /// the row content.
     ///
     /// When `isLoading` is true the count is hidden and a tiny inline
     /// ProgressView replaces it — that's the "results still streaming"
@@ -463,19 +464,14 @@ struct SearchView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 7)
-        .background(Color.white.opacity(0.04))
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text("No matches")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
+        NoResultsView(
+            query: viewModel.query.trimmingCharacters(in: .whitespaces),
+            hint: viewModel.viewMode == .zoomed
+                ? "Nothing in \(viewModel.activeTab.label). Press esc to see the other categories."
+                : "Check the spelling, or try a shorter search."
+        )
     }
 }

@@ -45,11 +45,7 @@ struct CompactMessageRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.28) : Color.clear)
-                .padding(.horizontal, 6)
-        )
+        .background(RowRendering.selectionBackground(isSelected))
         .contentShape(Rectangle())
     }
 

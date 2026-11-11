@@ -14,6 +14,11 @@ struct GlassSurface<S: InsettableShape>: ViewModifier {
     var shape: S
     /// Optional glass tint (26+). Ignored on the fallback path.
     var tint: Color? = nil
+    /// Use the clear glass variant (26+): fully see-through, without the
+    /// dimming layer regular glass puts behind content. On by default, so
+    /// every surface in the app (panels, key caps, pills, cards) is the
+    /// same clear glass. Ignored on the fallback path.
+    var clear: Bool = true
     /// Reacts to cursor/press with live specular movement (26+). No-op on
     /// the fallback path.
     var interactive: Bool = false
@@ -68,7 +73,7 @@ struct GlassSurface<S: InsettableShape>: ViewModifier {
 
     @available(macOS 26.0, *)
     private func glass() -> Glass {
-        var g: Glass = .regular
+        var g: Glass = clear ? .clear : .regular
         if let tint { g = g.tint(tint) }
         if interactive { g = g.interactive() }
         return g
@@ -118,6 +123,7 @@ extension View {
     func glassSurface(
         cornerRadius: CGFloat,
         tint: Color? = nil,
+        clear: Bool = true,
         interactive: Bool = false,
         frost: Double = 0.0,
         grain: Double = 0.0,
@@ -127,7 +133,7 @@ extension View {
     ) -> some View {
         modifier(GlassSurface(
             shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
-            tint: tint, interactive: interactive,
+            tint: tint, clear: clear, interactive: interactive,
             frost: frost, grain: grain,
             fallbackMaterial: fallbackMaterial,
             fallbackFill: fallbackFill, fallbackStroke: fallbackStroke
@@ -138,6 +144,7 @@ extension View {
     /// chips. Interactive by default since pills are almost always tappable.
     func glassCapsule(
         tint: Color? = nil,
+        clear: Bool = true,
         interactive: Bool = true,
         fallbackMaterial: NSVisualEffectView.Material = .hudWindow,
         fallbackFill: Double = 0.0,
@@ -145,7 +152,7 @@ extension View {
     ) -> some View {
         modifier(GlassSurface(
             shape: Capsule(style: .continuous),
-            tint: tint, interactive: interactive,
+            tint: tint, clear: clear, interactive: interactive,
             fallbackMaterial: fallbackMaterial,
             fallbackFill: fallbackFill, fallbackStroke: fallbackStroke
         ))
