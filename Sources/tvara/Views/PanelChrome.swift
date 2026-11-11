@@ -74,7 +74,8 @@ struct PanelFooter: View {
         }
         .padding(.horizontal, 18)
         .frame(height: 34)
-        .background(Color.white.opacity(0.03))
+        // No fill of its own: the footer sits directly on the panel's glass,
+        // separated from the list by a hairline only.
         .overlay(alignment: .top) {
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
         }

@@ -46,10 +46,9 @@ struct SearchView: View {
             }
         }
         .frame(width: bubbleWidth)
-        // Dark tint on the glass. Untinted, the panel is clear enough that
-        // a bright window behind it shows through as a pale gray patch,
-        // which reads as a second surface sitting under the results.
-        .glassSurface(cornerRadius: 16, tint: Color.black.opacity(0.45))
+        // Full glass: the clear variant, with no tint and no dimming layer,
+        // so the panel is glass all the way through.
+        .glassSurface(cornerRadius: 16, clear: true)
         .padding(.top, 4)
         // Single binary mode token drives the bubble's resize. Each
         // discrete mode (no query, results-pending, results-shown,
@@ -188,7 +187,6 @@ struct SearchView: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
-        .background(Color.white.opacity(0.025))
     }
 
     /// The one footer every level shares: what the list shows on the left,
@@ -462,7 +460,6 @@ struct SearchView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 7)
-        .background(Color.white.opacity(0.04))
     }
 
     private var emptyState: some View {

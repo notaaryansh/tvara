@@ -14,6 +14,10 @@ struct GlassSurface<S: InsettableShape>: ViewModifier {
     var shape: S
     /// Optional glass tint (26+). Ignored on the fallback path.
     var tint: Color? = nil
+    /// Use the clear glass variant (26+): fully see-through, without the
+    /// dimming layer regular glass puts behind content. Ignored on the
+    /// fallback path.
+    var clear: Bool = false
     /// Reacts to cursor/press with live specular movement (26+). No-op on
     /// the fallback path.
     var interactive: Bool = false
@@ -68,7 +72,7 @@ struct GlassSurface<S: InsettableShape>: ViewModifier {
 
     @available(macOS 26.0, *)
     private func glass() -> Glass {
-        var g: Glass = .regular
+        var g: Glass = clear ? .clear : .regular
         if let tint { g = g.tint(tint) }
         if interactive { g = g.interactive() }
         return g
@@ -118,6 +122,7 @@ extension View {
     func glassSurface(
         cornerRadius: CGFloat,
         tint: Color? = nil,
+        clear: Bool = false,
         interactive: Bool = false,
         frost: Double = 0.0,
         grain: Double = 0.0,
@@ -127,7 +132,7 @@ extension View {
     ) -> some View {
         modifier(GlassSurface(
             shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
-            tint: tint, interactive: interactive,
+            tint: tint, clear: clear, interactive: interactive,
             frost: frost, grain: grain,
             fallbackMaterial: fallbackMaterial,
             fallbackFill: fallbackFill, fallbackStroke: fallbackStroke
