@@ -21,25 +21,11 @@ final class AppSearchService {
         /// name is a single word (no acronym to form). Precomputed at the
         /// same time as `nameLower` so the scoring loop is allocation-free.
         let acronym: String
-        /// PNG bytes of the app's icon at `AppIconStore.pngMaxDim`. Baked
-        /// into every emitted `SearchResult.iconData` so the row renders
-        /// the icon via `NSImage(data:)` in the same frame as the row —
-        /// no lazy `.icns` decode on first draw. `nil` only between
-        /// scan-completion and the first warm pass that populates it.
-        let iconData: Data?
     }
 
     private var cache: [AppEntry] = []
     private var cacheTime: Date?
     private static let cacheLifetime: TimeInterval = 300   // 5 min
-
-    /// Monotonic id bumped on every `refreshCacheIfNeeded` pass. The
-    /// background icon-enrichment task captures this at dispatch time
-    /// and only swaps its result into `cache` if the generation still
-    /// matches — so a stale enrichment from refresh N can never
-    /// clobber the live cache from refresh N+1, even when the two
-    /// scans happen to have the same path set.
-    private var refreshGeneration: UInt64 = 0
 
     /// On-disk PNG cache shared across launches. Populated lazily in
     /// `refreshCacheIfNeeded`; survives restarts so the second-launch
@@ -47,12 +33,19 @@ final class AppSearchService {
     /// `.icns` bitmaps each cold start.
     private let iconStore: AppIconStore
 
+    /// Synchronous reader over the same database. Result rows pull their
+    /// icon PNG through this at match time, so only the icons a query
+    /// actually shows are ever in memory.
+    private nonisolated let iconReader: AppIconReader
+
     /// Nonisolated so the ViewModel's parameter list (`appService: AppSearchService
     /// = AppSearchService()`) can construct one in the synchronous nonisolated
     /// context Swift uses for default values. The body touches no MainActor
     /// state — every stored property has a default — so it's safe.
     nonisolated init() {
-        self.iconStore = AppIconStore()
+        let store = AppIconStore()
+        self.iconStore = store
+        self.iconReader = AppIconReader(dbPath: store.dbPath)
     }
 
     func warmCache() async {
@@ -163,7 +156,7 @@ final class AppSearchService {
                         // Fuzzy matches are GUESSES — they must rank below
                         // exact matches from any other source.
                         rank: 280,
-                        iconData: app.iconData,
+                        iconData: iconReader.png(forPath: app.path),
                         isFuzzyMatch: true
                     )
                 }
@@ -184,7 +177,7 @@ final class AppSearchService {
                 badge: nil,
                 openTarget: .file(app.path),
                 rank: rank,
-                iconData: app.iconData
+                iconData: iconReader.png(forPath: app.path)
             )
         }
     }
@@ -194,91 +187,42 @@ final class AppSearchService {
             return
         }
 
-        // 1. Scan installed apps off main and publish the un-enriched
-        //    cache IMMEDIATELY. The first search after launch returns
-        //    app results in ~scan-time + ~0 instead of waiting on ~300
-        //    icon encodes (1-3s cold). Rows with `iconData = nil`
-        //    fall back to FileIconView in the view layer — same path
-        //    that was used before app-icon caching landed, so this is
-        //    a zero-regression first-paint.
+        // 1. Scan installed apps off main and publish the list straight
+        //    away, so the first search after launch isn't waiting on icon
+        //    encodes (1-3s on a cold cache).
         let scanned = await Task.detached(priority: .userInitiated) {
             Self.scanInstalledApps()
         }.value
         cache = scanned
         cacheTime = Date()
-        refreshGeneration &+= 1
-        let generation = refreshGeneration
 
-        // 2. Enrich the cache with PNG iconData in the background. On
-        //    a warm launch (disk cache hits) this completes in tens
-        //    of ms; on a cold launch it takes 1-3s. Either way the
-        //    user can already search apps from step 1.
-        //    (No IconCache pre-warm any more: it decoded and retained a
-        //    full NSImage for every installed app — ~24 MB held forever —
-        //    as a fallback for rows that, once enrichment lands a moment
-        //    later, render from the 64px PNG instead.)
-        startIconEnrichment(for: scanned, generation: generation)
+        // 2. Make sure the on-disk icon cache is current, in the background.
+        //    Rows read their PNG from it at match time (see `iconReader`);
+        //    until an icon has been encoded its row falls back to
+        //    FileIconView.
+        startIconRefresh(for: scanned)
     }
 
-    /// Spawns a background task that hydrates `cache` entries with
-    /// their PNG `iconData`. Disk-cached entries (matching mtime) come
-    /// straight from `AppIconStore`; misses are re-encoded off main
-    /// and persisted in a side task so the enrichment loop isn't gated
-    /// on sqlite writes. The enriched cache is published in a single
-    /// actor-isolated swap via `replaceCache` once the pass completes.
-    /// `generation` is the refresh id at dispatch time — `replaceCache`
-    /// drops the result if a fresher refresh has bumped it since.
-    private func startIconEnrichment(for scanned: [AppEntry], generation: UInt64) {
+    /// Brings `AppIconStore` up to date with the installed apps: encodes
+    /// an icon for every app whose bundle changed (or that has none yet)
+    /// and drops rows for apps that are gone. Nothing is kept in memory —
+    /// on a warm launch this is a few hundred `stat` calls and no encodes.
+    private func startIconRefresh(for scanned: [AppEntry]) {
         let iconStore = self.iconStore
-        Task { [weak self] in
-            let cached = await iconStore.bulkFetch(paths: scanned.map(\.path))
-            let enriched = await Task.detached(priority: .utility) { () -> [AppEntry] in
-                var out: [AppEntry] = []
-                out.reserveCapacity(scanned.count)
-                for entry in scanned {
-                    let mtime = bundleMtimeSeconds(path: entry.path)
-                    let iconData: Data?
-                    if let mtime,
-                       let hit = cached[entry.path],
-                       abs(hit.bundleMtime - mtime) < 1.0 {
-                        iconData = hit.png
-                    } else {
-                        let png = encodeAppIconPNG(path: entry.path)
-                        iconData = png
-                        // Only persist when we have a usable freshness
-                        // key. A nil mtime means stat failed; caching
-                        // the row would risk a self-matching `mtime=0`
-                        // entry that never re-encodes.
-                        if let png, let mtime {
-                            Task { await iconStore.upsert(
-                                path: entry.path, bundleMtime: mtime, png: png
-                            ) }
-                        }
-                    }
-                    out.append(AppEntry(
-                        name: entry.name,
-                        path: entry.path,
-                        nameLower: entry.nameLower,
-                        acronym: entry.acronym,
-                        iconData: iconData
-                    ))
+        Task.detached(priority: .utility) {
+            let paths = scanned.map(\.path)
+            let cached = await iconStore.fetchMtimes(paths: paths)
+            for path in paths {
+                // A nil mtime means stat failed; caching the row would risk
+                // a self-matching `mtime=0` entry that never re-encodes.
+                guard let mtime = bundleMtimeSeconds(path: path) else { continue }
+                if let hit = cached[path], abs(hit - mtime) < 1.0 { continue }
+                if let png = encodeAppIconPNG(path: path) {
+                    await iconStore.upsert(path: path, bundleMtime: mtime, png: png)
                 }
-                return out
-            }.value
-            await self?.replaceCache(enriched, generation: generation)
-            await iconStore.prune(keepPaths: Set(scanned.map(\.path)))
+            }
+            await iconStore.prune(keepPaths: Set(paths))
         }
-    }
-
-    /// Actor-isolated cache swap. Drops the result when `generation`
-    /// no longer matches `refreshGeneration` — a fresher refresh has
-    /// run since this enrichment was dispatched and its result is the
-    /// one that should win. A monotonic id beats a path-set guard
-    /// because two back-to-back refreshes with the same install set
-    /// would otherwise let a stale enrichment clobber a newer one.
-    private func replaceCache(_ enriched: [AppEntry], generation: UInt64) {
-        guard generation == refreshGeneration else { return }
-        cache = enriched
     }
 
     // MARK: - Helpers
@@ -360,17 +304,14 @@ final class AppSearchService {
     }
 
     /// Build an `AppEntry` with `nameLower` + `acronym` precomputed so the
-    /// hot keystroke loop stays allocation-free. `iconData` is left nil
-    /// here — `refreshCacheIfNeeded` populates it from the disk cache or
-    /// re-encodes off main before exposing the entries to search.
+    /// hot keystroke loop stays allocation-free.
     nonisolated private static func makeEntry(name: String, path: String) -> AppEntry {
         let lower = name.lowercased()
         return AppEntry(
             name: name,
             path: path,
             nameLower: lower,
-            acronym: acronym(of: lower),
-            iconData: nil
+            acronym: acronym(of: lower)
         )
     }
 

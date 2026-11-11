@@ -306,11 +306,12 @@ had been running idle for 4–10 minutes; six samples, ten seconds apart.
 
 | Launcher | Idle footprint |
 |---|---|
-| Alfred 5.8 | 27 MB |
-| tvara | 41 MB |
-| Raycast 2.11 | 56 MB |
+| Alfred 5.8 | 29 MB |
+| tvara | 36 MB |
+| Raycast 2.11 | 57 MB |
 
-tvara's launch peak in the same run was 100 MB.
+tvara's launch peak in the same run was 144 MB, while it indexed new
+photos; its live heap at idle is 11.5 MB.
 
 To reproduce, with all three running:
 

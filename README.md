@@ -34,7 +34,7 @@ stream in as each one returns, so you never wait on the slowest.
 | Searches iMessage | ✓ | ✓ | – | – |
 | Finds photos by what's in them | ✓ | ✓ | – | – |
 | Snaps windows | ✓ | – | – | ✓ |
-| Memory at idle | 41 MB | n/a | 27 MB | 56 MB |
+| Memory at idle | 36 MB | n/a | 29 MB | 57 MB |
 | Open source | ✓ | – | – | – |
 | Price | Free | Built in | Free, paid Powerpack | Free, paid Pro |
 
