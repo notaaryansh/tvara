@@ -60,7 +60,7 @@ final class FuzzyMatchTests: XCTestCase {
         XCTAssertEqual(FuzzyMatch.budget(for: "abcd"), 1)
     }
 
-    func testBudgetIsTwoForLongerQueries() {
+    func testBudgetIsOneForFiveAndSixCharsAndTwoFromSeven() {
         XCTAssertEqual(FuzzyMatch.budget(for: "abcde"), 1)
         XCTAssertEqual(FuzzyMatch.budget(for: "abcdef"), 1)
         XCTAssertEqual(FuzzyMatch.budget(for: "abcdefg"), 2)

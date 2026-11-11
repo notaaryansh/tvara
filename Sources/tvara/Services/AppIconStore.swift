@@ -191,6 +191,15 @@ final class AppIconReader: @unchecked Sendable {
         defer { sqlite3_reset(stmt) }
         sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT_AI)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        // An app that was updated since its icon was cached has a newer
+        // bundle mtime. Return nil for it — the row falls back to the live
+        // icon — until the next refresh re-encodes the PNG. One `stat`,
+        // about a microsecond.
+        var info = stat()
+        guard stat(path, &info) == 0 else { return nil }
+        let mtime = Double(info.st_mtimespec.tv_sec)
+            + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000
+        guard abs(sqlite3_column_double(stmt, 1) - mtime) < 1.0 else { return nil }
         let len = Int(sqlite3_column_bytes(stmt, 0))
         guard len > 0, let blob = sqlite3_column_blob(stmt, 0) else { return nil }
         return Data(bytes: blob, count: len)
@@ -222,7 +231,7 @@ final class AppIconReader: @unchecked Sendable {
         }
         var prepared: OpaquePointer?
         guard sqlite3_prepare_v2(
-            db, "SELECT png FROM app_icons WHERE path = ?", -1, &prepared, nil
+            db, "SELECT png, bundle_mtime FROM app_icons WHERE path = ?", -1, &prepared, nil
         ) == SQLITE_OK else {
             sqlite3_finalize(prepared)
             return nil

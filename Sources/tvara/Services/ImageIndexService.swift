@@ -264,10 +264,22 @@ actor ImageIndexService {
     /// those tables. Idempotent — gated by `rrf_backfill_done`.
     private func backfillLabelsAndFTSIfNeeded() async {
         guard let db else { return }
-        // No models needed: this only rewrites label rows from the JSON
-        // already stored. (It used to load both encoders first, which put
-        // ~300 MB into every launch that still had the flag unset —
-        // including a brand-new, empty database.)
+        // Nothing to backfill (a new or empty index): finish without
+        // touching the models, so launch stays model-free.
+        var probe: OpaquePointer?
+        let hasRows = sqlite3_prepare_v2(
+            db, "SELECT 1 FROM images WHERE labels_json IS NOT NULL LIMIT 1", -1, &probe, nil
+        ) == SQLITE_OK && sqlite3_step(probe) == SQLITE_ROW
+        sqlite3_finalize(probe)
+        guard hasRows else {
+            setMetaValue("rrf_backfill_done", "1")
+            return
+        }
+        // Rewriting labels embeds each label name (writeImageLabels →
+        // ensureLabel → encodeText), so the text encoder must be loaded.
+        // If it can't be, leave the flag unset and retry next launch rather
+        // than recording labels with no embeddings.
+        guard await ensureModels(.text) else { return }
 
         NSLog("ImageIndexService: one-time backfill of labels + FTS5 for existing rows")
         sqlite3_exec(db, "INSERT INTO images_fts(images_fts) VALUES('rebuild')", nil, nil, nil)

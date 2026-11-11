@@ -310,8 +310,10 @@ had been running idle for 4–10 minutes; six samples, ten seconds apart.
 | tvara | 36 MB |
 | Raycast 2.11 | 57 MB |
 
-tvara's launch peak in the same run was 144 MB, while it indexed new
-photos; its live heap at idle is 11.5 MB.
+tvara's peak footprint over that session was 144 MB, reached while it
+indexed new photos (read from `footprint`'s `phys_footprint_peak`; the
+script itself only samples processes that are already running). Its live
+heap at idle is 11.5 MB.
 
 To reproduce, with all three running:
 

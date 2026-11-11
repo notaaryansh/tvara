@@ -20,7 +20,9 @@ enum HangWatch {
         let thread = Thread {
             let pid = ProcessInfo.processInfo.processIdentifier
             let stamp = DateFormatter()
-            stamp.dateFormat = "HHmmss"
+            // Date as well as time, so a report from another day is never
+            // overwritten.
+            stamp.dateFormat = "yyyyMMdd-HHmmss"
             while true {
                 let answered = DispatchSemaphore(value: 0)
                 DispatchQueue.main.async { answered.signal() }
@@ -31,9 +33,21 @@ enum HangWatch {
                     task.arguments = ["\(pid)", "2", "2", "-file", out.path]
                     task.standardOutput = FileHandle.nullDevice
                     task.standardError = FileHandle.nullDevice
-                    try? task.run()
-                    task.waitUntilExit()
-                    NSLog("HangWatch: main thread stalled, saved %@", out.path)
+                    do {
+                        try task.run()
+                        task.waitUntilExit()
+                        // Only claim a capture that actually exists.
+                        if task.terminationStatus == 0,
+                           FileManager.default.fileExists(atPath: out.path) {
+                            NSLog("HangWatch: main thread stalled, saved %@", out.path)
+                        } else {
+                            NSLog("HangWatch: main thread stalled, but sampling failed (status %d)",
+                                  task.terminationStatus)
+                        }
+                    } catch {
+                        NSLog("HangWatch: main thread stalled, but the sampler could not start: %@",
+                              "\(error)")
+                    }
                     // Wait for the stall to clear so one freeze = one file.
                     answered.wait()
                 }
