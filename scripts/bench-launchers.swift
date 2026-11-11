@@ -25,7 +25,8 @@
 //
 // Reading the numbers
 //   Result detection polls the Accessibility tree, so each reading is
-//   quantised to one poll (reported per launcher as "poll ms"). Differences
+//   quantised to one poll (the median cost of a poll is reported per
+//   launcher). Differences
 //   smaller than that are noise. The same method is used for every launcher.
 
 import AppKit
@@ -120,8 +121,8 @@ func type(_ ch: Character) {
 
 func now() -> Double { CFAbsoluteTimeGetCurrent() }
 
-/// True when `pid` owns an on-screen window big enough to be its panel
-/// (filters out menu-bar status items).
+/// True when `pid` owns an on-screen floating window big enough to be its
+/// panel (filters out menu-bar status items and ordinary windows).
 func panelVisible(_ pid: pid_t) -> Bool {
     guard let list = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
@@ -130,7 +131,11 @@ func panelVisible(_ pid: pid_t) -> Bool {
         guard (w[kCGWindowOwnerPID as String] as? pid_t) == pid,
               let b = w[kCGWindowBounds as String] as? [String: CGFloat],
               (b["Width"] ?? 0) > 300, (b["Height"] ?? 0) > 40,
-              ((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.05
+              ((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.05,
+              // Launcher panels float above normal windows (layer > 0).
+              // Requiring that keeps an open Settings or preferences
+              // window (layer 0) from being mistaken for the panel.
+              ((w[kCGWindowLayer as String] as? Int) ?? 0) > 0
         else { continue }
         return true
     }
@@ -191,6 +196,17 @@ func ms(_ seconds: Double) -> String {
 
 // MARK: - Run
 
+func fail(_ message: String) -> Never {
+    print(message)
+    exit(2)
+}
+if trials < 1 { fail("--trials must be at least 1") }
+if query.isEmpty || expect.isEmpty { fail("--query and --expect must not be empty") }
+if query.count >= expect.count,
+   expect.range(of: query, options: .caseInsensitive) != nil || query.caseInsensitiveCompare(expect) == .orderedSame {
+    fail("--query must be shorter than --expect so the typed text itself isn't counted as a result")
+}
+
 guard AXIsProcessTrusted() else {
     print("""
     This terminal doesn't have Accessibility permission.
@@ -199,13 +215,8 @@ guard AXIsProcessTrusted() else {
     exit(1)
 }
 
-precondition(
-    expect.range(of: query, options: .caseInsensitive) == nil || query.count < expect.count,
-    "--query must be shorter than --expect so the typed text itself isn't counted as a result"
-)
-
 print("Query \"\(query)\" → expecting \"\(expect)\", \(trials) trials each (first one discarded as warm-up).\n")
-print("| Launcher | Shortcut | Open panel (ms) | First result (ms) | Poll (ms) | Misses |")
+print("| Launcher | Shortcut | Open panel (ms) | First result (ms) | Median poll (ms) | Misses |")
 print("| --- | --- | ---: | ---: | ---: | ---: |")
 
 for launcher in launchers {
@@ -225,10 +236,24 @@ for launcher in launchers {
     var polls: [Double] = []
     var misses = 0
 
+    /// Esc twice, then wait for the panel to be gone, so every trial
+    /// starts from a closed launcher.
+    func closePanel() {
+        press(53); usleep(80_000); press(53)
+        _ = waitFor(timeout: 2) { !panelVisible(pid) }
+        usleep(400_000)
+    }
+    if panelVisible(pid) { closePanel() }
+
     for trial in 0...trials {          // trial 0 is the warm-up
         press(code, flags: flags)
         guard let tOpen = waitFor(timeout: 2, { panelVisible(pid) }) else {
-            misses += 1
+            // The panel may still show up late. Give it a moment and close
+            // it, or the next shortcut press would toggle it shut and every
+            // later trial would type into the wrong state.
+            usleep(500_000)
+            if panelVisible(pid) { closePanel() }
+            if trial > 0 { misses += 1 }
             continue
         }
         usleep(150_000)                // let the panel take focus
@@ -236,22 +261,21 @@ for launcher in launchers {
         for ch in query { type(ch); usleep(1_000) }
         let typed = now()
 
-        var pollCost = 0.0
+        var trialPolls: [Double] = []
         let found = waitFor(timeout: 3) {
             let t = now()
             let hit = resultVisible(app, needle: expect)
-            pollCost = now() - t
+            trialPolls.append(now() - t)
             return hit
         }
         let tResult = found.map { _ in now() - typed }
 
-        press(53); usleep(80_000); press(53)          // Esc, Esc
-        _ = waitFor(timeout: 2) { !panelVisible(pid) }
-        usleep(400_000)
+        closePanel()
 
         guard trial > 0 else { continue }
         opens.append(tOpen)
-        if let tResult { results.append(tResult); polls.append(pollCost) } else { misses += 1 }
+        polls.append(contentsOf: trialPolls)
+        if let tResult { results.append(tResult) } else { misses += 1 }
     }
 
     print("| \(launcher.name) | \(launcher.hotkey) | \(ms(median(opens))) | \(ms(median(results))) | \(ms(median(polls))) | \(misses) |")

@@ -60,7 +60,7 @@ workflows and extensions. Memory measured on an Apple M4, macOS 27; see
    [Releases](https://github.com/notaaryansh/tvara/releases/latest).
 2. Drag tvara to Applications and open it.
 3. Pick your shortcut and choose what tvara can search. Every
-   permission is optional and nothing is requested until you click.
+   permission is optional.
 
 Requires macOS 14 or later on Apple Silicon.
 
@@ -82,7 +82,9 @@ search uses an on-device model, so images never leave your disk.
 tvara has no analytics and no account.
 
 Natural-language queries and message drafting can use OpenAI, only if
-you add your own API key. Without a key, nothing is sent anywhere.
+you add your own API key. Without a key, none of your queries or data are
+sent anywhere. The one other network request is cover art for Spotify
+results, fetched from Spotify's image server.
 
 ## Build from source
 
@@ -92,8 +94,9 @@ scripts/build-app.sh
 open ./tvara.app
 ```
 
-You need the Xcode Command Line Tools and a code-signing certificate in
-your Keychain; set `SIGNING_IDENTITY` in `scripts/build-app.sh`. Signing
+You need Xcode (the full app, not just the Command Line Tools: the model
+step uses its Core ML compiler) and a code-signing certificate in your
+Keychain; set `SIGNING_IDENTITY` in `scripts/build-app.sh`. Signing
 keeps macOS permissions from resetting on every rebuild.
 
 How it's put together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

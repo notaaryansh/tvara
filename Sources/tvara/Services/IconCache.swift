@@ -1,16 +1,16 @@
 import AppKit
 
-/// Process-wide NSImage cache for file icons.
+/// Process-wide NSImage cache for file icons, keyed by full path.
 ///
 /// `NSWorkspace.shared.icon(forFile:)` returns instantly but the resulting
 /// NSImage decodes its bitmap lazily on first draw. Caching the object by
-/// path means rows that share an icon (several files of one type, the same
-/// folder in two sections) reuse a decoded image instead of each paying
-/// for it.
+/// path means a path that is drawn again (the same file or folder showing
+/// up in a later query, or in two sections) reuses its decoded image.
 ///
-/// App rows don't come through here: they render a small pre-encoded PNG
-/// from AppIconStore. This is the fallback for file rows, and for app rows
-/// in the first moments after a cold launch.
+/// App rows normally render a small pre-encoded PNG from AppIconStore and
+/// never come through here. Rows without one fall back to this cache: file
+/// and folder rows, and app rows on a first launch before their PNG has
+/// been encoded.
 @MainActor
 final class IconCache {
     static let shared = IconCache()

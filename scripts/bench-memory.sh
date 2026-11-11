@@ -46,19 +46,22 @@ bundle_pids() {
 
 echo "macOS $(sw_vers -productVersion), $(sysctl -n machdep.cpu.brand_string), $(( $(sysctl -n hw.memsize) / 1073741824 )) GB RAM"
 echo
-echo "| App | Min (MB) | Max (MB) | Processes | Samples |"
+echo "| App | Min (MB) | Max (MB) | Max processes | Samples |"
 echo "| --- | ---: | ---: | ---: | ---: |"
 
 for entry in "${APPS[@]}"; do
     name="${entry%%:*}"; bundle="${entry##*:}"
-    pids="$(bundle_pids "$bundle" || true)"
-    if [[ -z "$pids" ]]; then
+    if [[ -z "$(bundle_pids "$bundle" || true)" ]]; then
         echo "| $name | not running | | | |"
         continue
     fi
-    count="$(echo "$pids" | wc -l | tr -d ' ')"
-    min=""; max=""; n=0
+    min=""; max=""; n=0; count=0
     for ((i = 0; i < SAMPLES; i++)); do
+        # Re-list the bundle's processes for every sample: helpers come and
+        # go, and a list taken once would miss late starters.
+        pids="$(bundle_pids "$bundle" || true)"
+        procs="$(echo "$pids" | grep -c . || true)"
+        if [[ "$procs" -gt "$count" ]]; then count="$procs"; fi
         total=0
         for pid in $pids; do
             mb="$(footprint_mb "$pid" || true)"
@@ -80,6 +83,8 @@ if [[ "$DETAIL" == 1 ]]; then
     if [[ -n "$pid" ]]; then
         echo
         echo "tvara, largest categories:"
-        footprint -p "$pid" | awk '/Category/ {on=1; next} on && NF' | head -14
+        # Row limit lives in awk: piping to `head` would close the pipe
+        # early and fail the script under `pipefail`.
+        footprint -p "$pid" | awk '/Category/ {on=1; next} on && NF && n < 14 {print; n++}'
     fi
 fi

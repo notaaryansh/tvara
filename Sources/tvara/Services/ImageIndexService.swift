@@ -264,7 +264,10 @@ actor ImageIndexService {
     /// those tables. Idempotent — gated by `rrf_backfill_done`.
     private func backfillLabelsAndFTSIfNeeded() async {
         guard let db else { return }
-        guard await ensureModels() else { return }
+        // No models needed: this only rewrites label rows from the JSON
+        // already stored. (It used to load both encoders first, which put
+        // ~300 MB into every launch that still had the flag unset —
+        // including a brand-new, empty database.)
 
         NSLog("ImageIndexService: one-time backfill of labels + FTS5 for existing rows")
         sqlite3_exec(db, "INSERT INTO images_fts(images_fts) VALUES('rebuild')", nil, nil, nil)
@@ -915,6 +918,11 @@ actor ImageIndexService {
         NSLog("ImageIndexService: indexing \(newOrChanged.count) image(s)")
         var done = 0
         for url in newOrChanged {
+            // Re-check before every image, not once per sweep: the loop
+            // yields, so on a long sweep the idle timer (or a memory-pressure
+            // unload) can drop the models underneath it. This reloads them
+            // if needed and pushes the idle timer back.
+            guard await ensureModels() else { break }
             indexOne(url)
             done += 1
             // Yield every image so search() calls (which run on the same
@@ -993,6 +1001,10 @@ actor ImageIndexService {
               cg.bitsPerComponent <= 8 else {
             return
         }
+        // Without the encoder there is nothing worth storing: a row with
+        // an empty embedding and a current mtime would count as indexed and
+        // never be retried. Leave the file for the next pass instead.
+        guard clipImage != nil else { return }
         let v = runVision(on: cg)
         let emb = encodeImage(cg) ?? []
         upsert(path: url.path,

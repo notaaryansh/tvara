@@ -375,8 +375,12 @@ final class SearchViewModel: ObservableObject {
         // Automation-gated: Calendar create + iMessage/Spotify AppleScript.
         if PermissionsBootstrap.currentlyGranted(.automation) {
             startOnce("calendar")     { Task { await CalendarEventSaver.warmAccess() } }
-            startOnce("imessageSend") { Task.detached { IMessageSender.warmAccess() } }
-            startOnce("spotify")      { Task.detached { SpotifyPlayer.warmAccess() } }
+            // Messages and Spotify are deliberately NOT warmed here. Their
+            // warmAccess() asks macOS for Automation consent, and this
+            // branch only knows Calendar is allowed — so it could raise a
+            // system prompt at launch. That consent is requested from the
+            // Permissions row, or in context the first time you send a
+            // message or play something.
         }
     }
 
