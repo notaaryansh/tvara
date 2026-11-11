@@ -307,10 +307,10 @@ had been running idle for 4–10 minutes; six samples, ten seconds apart.
 | Launcher | Idle footprint |
 |---|---|
 | Alfred 5.8 | 27 MB |
+| tvara | 41 MB |
 | Raycast 2.11 | 56 MB |
-| tvara (this branch) | 81–82 MB |
 
-tvara's launch peak in the same run was 892 MB before settling.
+tvara's launch peak in the same run was 100 MB.
 
 To reproduce, with all three running:
 

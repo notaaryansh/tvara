@@ -213,7 +213,10 @@ final class AppSearchService {
         //    a warm launch (disk cache hits) this completes in tens
         //    of ms; on a cold launch it takes 1-3s. Either way the
         //    user can already search apps from step 1.
-        IconCache.shared.warm(paths: cache.map(\.path))
+        //    (No IconCache pre-warm any more: it decoded and retained a
+        //    full NSImage for every installed app — ~24 MB held forever —
+        //    as a fallback for rows that, once enrichment lands a moment
+        //    later, render from the 64px PNG instead.)
         startIconEnrichment(for: scanned, generation: generation)
     }
 

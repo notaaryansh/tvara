@@ -293,6 +293,10 @@ actor EventBus {
             let s = String(cString: sqlite3_column_text(stmt, 0))
             out[s] = Int(sqlite3_column_int(stmt, 1))
         }
+        // The GROUP BY walks the whole events table; drop the pages it
+        // pulled into the cache rather than holding them while idle.
+        sqlite3_reset(stmt)
+        sqlite3_db_release_memory(db)
         return out
     }
 
