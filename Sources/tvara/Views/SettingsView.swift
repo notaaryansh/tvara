@@ -41,7 +41,9 @@ struct SettingsView: View {
             closeButton
         }
         .frame(width: panelWidth, height: panelHeight)
-        .glassSurface(cornerRadius: 20)
+        // Same dark tint as the search panel: untinted clear glass lets the
+        // desktop show through at full strength and the text gets lost in it.
+        .glassSurface(cornerRadius: 20, tint: Color.black.opacity(0.4))
     }
 
     // MARK: Tab bar

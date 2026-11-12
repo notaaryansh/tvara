@@ -58,7 +58,9 @@ struct OnboardingView: View {
             progressDots
         }
         .frame(width: panelWidth, height: panelHeight)
-        .glassSurface(cornerRadius: 20)
+        // Same dark tint as the search panel: untinted clear glass lets the
+        // desktop show through at full strength and the text gets lost in it.
+        .glassSurface(cornerRadius: 20, tint: Color.black.opacity(0.4))
         .scaleEffect(appeared || reduceMotion ? 1 : 0.94)
         .opacity(appeared ? 1 : 0)
         .animation(.snappy(duration: 0.22, extraBounce: 0), value: stepIndex)
