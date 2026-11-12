@@ -46,13 +46,12 @@ struct SearchView: View {
             }
         }
         .frame(width: bubbleWidth)
-        // Full glass: the clear variant, with no tint and no dimming layer,
-        // so the panel is glass all the way through.
-        // The panel is the one surface on regular glass rather than clear:
-        // regular glass diffuses what is behind it, so text from the window
-        // underneath can't be read through the results. The tint is in the
-        // glass itself (not a layer over it) and deepens it a little.
-        .glassSurface(cornerRadius: 16, tint: Color.black.opacity(0.3), clear: false)
+        // Clear glass with a dark tint in the glass itself. It must be the
+        // clear variant: regular glass thickens as a surface grows, so the
+        // panel was see-through as a bare search bar and then turned into a
+        // flat grey slab the moment results made it tall. Clear glass looks
+        // the same at every size; the tint supplies the opacity instead.
+        .glassSurface(cornerRadius: 16, tint: Color.black.opacity(0.4))
         .padding(.top, 4)
         // Single binary mode token drives the bubble's resize. Each
         // discrete mode (no query, results-pending, results-shown,
