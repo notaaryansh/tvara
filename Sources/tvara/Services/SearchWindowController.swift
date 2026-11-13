@@ -82,6 +82,13 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
             viewModel.setWindowTarget(pid: nil, appName: nil)
         }
 
+        // Read the open browser tabs now, in the background, so they are
+        // searchable by the time a query is typed. The frontmost app is
+        // passed along so a browser the user was just in ranks first.
+        viewModel.refreshBrowserTabs(
+            frontmostBundleID: frontmost?.bundleIdentifier
+        )
+
         // BEFORE we steal focus, try to grab whatever text the user has
         // selected in the frontmost app. If they have a selection, we
         // open straight into "acting mode" with that text as the context

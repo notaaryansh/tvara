@@ -111,6 +111,34 @@ struct SearchResultRow: View {
             // color + the SF Symbol "power" baked into the source. No
             // schematic preview — the symbol itself is the visual.
             tintedBadge
+        case .browserTab(let tab):
+            // The page's favicon when the browser has one on disk, in the
+            // same soft bubble other favicons get; otherwise the browser's
+            // own app icon, full-bleed.
+            if let data = result.iconData, let img = RowRendering.image(from: data) {
+                if tab.hasFavicon {
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 24, height: 24)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color.white.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                        )
+                } else {
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 36, height: 36)
+                }
+            } else {
+                tintedBadge
+            }
         case .imagesCollection:
             // SearchView routes the collection row to PhotoCollectionRow
             // and never instantiates SearchResultRow for it, so this case

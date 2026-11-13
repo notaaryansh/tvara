@@ -114,6 +114,9 @@ struct SearchResult: Identifiable, Hashable {
         /// System-level action — sleep / shut down / restart / lock screen /
         /// log out. Executed via NSAppleScript off the main thread.
         case systemAction(SystemAction)
+        /// Switch to a tab that is already open in a running browser.
+        /// Captured when the panel opened; see BrowserTabsService.
+        case browserTab(BrowserTab)
         /// Synthetic "many photos matched" row used in the blended view.
         /// Enter on the row zooms into the images category; left/right
         /// scrubs across the inline thumb strip and Enter on a focused
@@ -151,6 +154,7 @@ struct SearchResult: Identifiable, Hashable {
         case window    = "Window"
         case settings  = "Settings"
         case systemAction = "System"
+        case browserTab = "Tab"
 
         var icon: String {
             switch self {
@@ -175,6 +179,7 @@ struct SearchResult: Identifiable, Hashable {
             case .window:    return "macwindow"
             case .settings:  return "gearshape.fill"
             case .systemAction: return "power"
+            case .browserTab: return "macwindow.on.rectangle"
             }
         }
 
@@ -201,6 +206,7 @@ struct SearchResult: Identifiable, Hashable {
             case .window:    return Color(red: 0.35, green: 0.55, blue: 0.75)   // calm steel-blue
             case .settings:  return Color(red: 0.55, green: 0.58, blue: 0.62)   // gunmetal gray
             case .systemAction: return Color(red: 0.85, green: 0.32, blue: 0.30) // power-button red
+            case .browserTab: return Color(red: 0.26, green: 0.52, blue: 0.96)
             }
         }
     }

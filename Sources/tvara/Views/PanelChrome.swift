@@ -158,6 +158,7 @@ extension SearchResult {
         case .spotifyPlay:                 return "Play"
         case .windowAction:                return "Move window"
         case .systemAction:                return "Run"
+        case .browserTab:                  return "Switch to tab"
         case .imagesCollection:            return "Show photos"
         case .expandSection:               return "Show more"
         case .file:                        return source == .app ? "Open app" : "Open"
