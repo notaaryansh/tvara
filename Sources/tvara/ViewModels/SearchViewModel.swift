@@ -68,6 +68,7 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var settingsResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
     @Published private(set) var folderResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
     @Published private(set) var systemActionResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
+    @Published private(set) var tabResults: [SearchResult] = [] { didSet { blendedSectionsCache = nil } }
 
     /// Memoized result of `blendedSections`. `nil` = stale, recompute on
     /// next read. Invalidated via `didSet` on every input @Published
@@ -192,6 +193,7 @@ final class SearchViewModel: ObservableObject {
     private let eventBusPipeline: EventBusPipeline
     private let folderService: FoldersService
     private let systemActionsService: SystemActionsService
+    private let tabsService = BrowserTabsService()
     private let smartService: SmartSearchService
     private let embeddingStore: EmbeddingStore
     private let historyStore: SelectionHistoryStore
@@ -401,6 +403,21 @@ final class SearchViewModel: ObservableObject {
         windowService.targetAppName = appName
     }
 
+    /// Re-read the open tabs of every running browser. Called by
+    /// SearchWindowController as the panel opens, with the app that was
+    /// frontmost, so its tabs rank first. The read is off the main thread;
+    /// when a browser's tabs land the current query is matched again, so
+    /// tabs appear even if the user was already typing.
+    func refreshBrowserTabs(frontmostBundleID: String?) {
+        tabsService.onUpdate = { [weak self] in
+            guard let self else { return }
+            let trimmed = self.query.trimmingCharacters(in: .whitespaces)
+            guard trimmed.count >= Self.minimumQueryLength else { return }
+            self.tabResults = self.tabsService.match(query: trimmed)
+        }
+        tabsService.refresh(frontmostBundleID: frontmostBundleID)
+    }
+
     // MARK: - Tabs
 
     func cycleTab(forward: Bool) {
@@ -465,7 +482,7 @@ final class SearchViewModel: ObservableObject {
             notionResults = []; linearResults = []; spotifyResults = []
             clipboardResults = []; imageResults = []; windowResults = []
             settingsResults = []; folderResults = []
-            systemActionResults = []
+            systemActionResults = []; tabResults = []
             selectedIndex = 0; selectedCardIndex = 0
             selectedThumbIndex = nil
             expandedSections = []
@@ -487,6 +504,7 @@ final class SearchViewModel: ObservableObject {
         settingsResults      = settingsService.match(query: trimmed); __mark("settingsService.match")
         folderResults        = folderService.match(query: trimmed); __mark("folderService.match")
         systemActionResults  = systemActionsService.match(query: trimmed); __mark("systemActionsService.match")
+        tabResults           = tabsService.match(query: trimmed); __mark("tabsService.match")
 
         // Clear EVERY @Published source array SYNCHRONOUSLY so the merged
         // view doesn't briefly show stale results from the previous query
@@ -1234,6 +1252,7 @@ final class SearchViewModel: ObservableObject {
             + settingsResults
             + folderResults
             + systemActionResults
+            + tabResults
             + notionResults
             + linearResults
             + spotifyResults
@@ -1740,6 +1759,9 @@ final class SearchViewModel: ObservableObject {
             // needed here.
             _ = systemActionsService.execute(action)
 
+        case .browserTab(let tab):
+            tabsService.activate(tab)
+
         case .imagesCollection, .expandSection:
             // Already handled in open() above; reaching here means we
             // dispatched a result whose target type changed underneath us.
@@ -2011,7 +2033,7 @@ final class SearchViewModel: ObservableObject {
         imessageResults = []; mailResults = []; notesResults = []
         clipboardResults = []; windowResults = []
         settingsResults = []; folderResults = []
-        systemActionResults = []
+        systemActionResults = []; tabResults = []
         selectedIndex = 0; selectedCardIndex = 0
         selectedThumbIndex = nil
         viewMode = .blended
